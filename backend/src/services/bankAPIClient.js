@@ -171,14 +171,29 @@ class BankAPIClient {
 
   async getConsultStatus(cpf) {
     try {
+      // Calcular datas (hoje - 7 dias até hoje + 1 hora)
+      const endDate = new Date();
+      endDate.setHours(endDate.getHours() + 1); // 1 hora a mais
+
+      const startDate = new Date();
+      startDate.setDate(startDate.getDate() - 7); // 7 dias atrás
+
+      const params = new URLSearchParams({
+        startDate: startDate.toISOString(),
+        endDate: endDate.toISOString(),
+        search: cpf || '',
+        page: '1',
+        limit: '1000'
+      });
+
       const response = await axios.get(
-        `${this.bffBaseURL}/private-consignment/consult/cpf/${cpf}`,
-        { 
+        `${this.bffBaseURL}/private-consignment/consult?${params.toString()}`,
+        {
           headers: this._getHeaders(),
           timeout: 30000
         }
       );
-      
+
       return {
         success: true,
         data: response.data,
