@@ -41,14 +41,20 @@ function Dashboard() {
       </header>
 
       <nav className="dashboard-nav">
-        <button onClick={() => navigate('/')} className="nav-btn active">
+        <button onClick={() => navigate('/')} className="nav-btn">
+          🏠 Início
+        </button>
+        <button onClick={() => navigate('/jobs')} className="nav-btn">
+          📋 Jobs FGTS
+        </button>
+        <button onClick={() => navigate('/dashboard')} className="nav-btn active">
           📊 Dashboard
         </button>
         <button onClick={() => navigate('/credentials')} className="nav-btn">
           🔑 Credenciais
         </button>
         <button onClick={() => navigate('/simulations')} className="nav-btn">
-          📋 Simulações
+          🏦 Simulações
         </button>
         <button onClick={() => navigate('/new-simulation')} className="nav-btn btn-primary">
           ➕ Nova Simulação
