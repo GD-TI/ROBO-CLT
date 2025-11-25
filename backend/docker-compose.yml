@@ -1,0 +1,116 @@
+version: '3.8'
+
+services:
+  # PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: simulacao-postgres
+    environment:
+      POSTGRES_DB: simulacao_bancaria
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./database/schema.sql:/docker-entrypoint-initdb.d/schema.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - simulacao-network
+
+  # Redis
+  redis:
+    image: redis:7-alpine
+    container_name: simulacao-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - simulacao-network
+
+  # API
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: simulacao-api
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      
+      # PostgreSQL
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: simulacao_bancaria
+      DB_USER: postgres
+      DB_PASSWORD: postgres
+      
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      
+      # JWT
+      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      JWT_EXPIRES_IN: 24h
+      
+      # Encryption
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:-0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef}
+      
+      # API Externa
+      BFF_BASE_URL: https://bff.v8sistema.com
+      V8_BFF_BASE_URL: https://v8-bff-prod.yellowisland-b252a8a0.eastus.azurecontainerapps.io
+      
+      # Config
+      DEFAULT_CONFIG_ID: c51e2ded-15c7-4de8-b4d4-fa147092d8af
+      DEFAULT_SIGNER_EMAIL: ${DEFAULT_SIGNER_EMAIL:-contato@empresa.com}
+      
+      # SQL Server (SERASA)
+      SQLSERVER_HOST: ${SQLSERVER_HOST}
+      SQLSERVER_PORT: ${SQLSERVER_PORT:-1433}
+      SQLSERVER_DATABASE: ${SQLSERVER_DATABASE:-SERASA}
+      SQLSERVER_USER: ${SQLSERVER_USER}
+      SQLSERVER_PASSWORD: ${SQLSERVER_PASSWORD}
+      SQLSERVER_ENCRYPT: ${SQLSERVER_ENCRYPT:-true}
+      SQLSERVER_TRUST_SERVER_CERTIFICATE: ${SQLSERVER_TRUST_SERVER_CERTIFICATE:-true}
+      
+      # Rate limiting
+      MAX_CONCURRENT_SIMULATIONS: 5
+      CONSULT_STATUS_RETRY_INTERVAL: 3000
+      CONSULT_STATUS_MAX_RETRIES: 60
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - simulacao-network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:3000/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  simulacao-network:
+    driver: bridge
