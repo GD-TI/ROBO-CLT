@@ -187,8 +187,8 @@ class BankAPIClient {
       });
 
       const response = await axios.get(
-        `${this.bffBaseURL}/private-consignment/consult?${params.toString()}`,
-        {
+        `${this.bffBaseURL}/private-consignment/consult/search=${cpf}`,
+        { 
           headers: this._getHeaders(),
           timeout: 30000
         }
