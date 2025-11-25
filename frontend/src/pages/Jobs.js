@@ -39,9 +39,23 @@ function Jobs() {
   const exportCSV = async (jobId) => {
     try {
       const token = localStorage.getItem('token');
-      window.open(`${API_URL}/jobs/${jobId}/export?token=${token}`, '_blank');
+      const response = await axios.get(`${API_URL}/jobs/${jobId}/export`, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'blob'
+      });
+
+      // Criar um link temporário para download
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `job-${jobId}-${Date.now()}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Erro ao exportar:', error);
+      alert('Erro ao exportar CSV');
     }
   };
 
