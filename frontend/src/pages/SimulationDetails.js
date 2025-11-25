@@ -83,13 +83,19 @@ function SimulationDetails() {
 
       <nav className="dashboard-nav">
         <button onClick={() => navigate('/')} className="nav-btn">
+          🏠 Início
+        </button>
+        <button onClick={() => navigate('/jobs')} className="nav-btn">
+          📋 Jobs FGTS
+        </button>
+        <button onClick={() => navigate('/dashboard')} className="nav-btn">
           📊 Dashboard
         </button>
         <button onClick={() => navigate('/credentials')} className="nav-btn">
           🔑 Credenciais
         </button>
         <button onClick={() => navigate('/simulations')} className="nav-btn">
-          📋 Simulações
+          🏦 Simulações
         </button>
         <button onClick={() => navigate('/new-simulation')} className="nav-btn btn-primary">
           ➕ Nova Simulação
@@ -173,7 +179,7 @@ function SimulationDetails() {
                 <div className="detail-item">
                   <span className="detail-label">Margem Disponível:</span>
                   <span className="detail-value">
-                    {simulation.available_margin_value 
+                    {simulation.available_margin_value
                       ? `R$ ${parseFloat(simulation.available_margin_value).toFixed(2)}`
                       : '-'
                     }
@@ -184,6 +190,12 @@ function SimulationDetails() {
                   <span className="detail-value">{simulation.partner_id || '-'}</span>
                 </div>
               </div>
+              {simulation.description && (
+                <div className="description-box success-description">
+                  <strong>ℹ️ Retorno do Banco:</strong>
+                  <p>{simulation.description}</p>
+                </div>
+              )}
             </div>
           )}
 

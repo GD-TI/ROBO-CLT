@@ -197,3 +197,27 @@
   color: #991b1b;
   font-size: 0.9rem;
 }
+
+.description-box {
+  margin-top: 20px;
+  padding: 16px;
+  border-radius: 8px;
+  line-height: 1.6;
+}
+
+.description-box strong {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 8px;
+}
+
+.description-box p {
+  margin: 0;
+  font-size: 0.95rem;
+}
+
+.success-description {
+  background: #f0f9ff;
+  border-left: 3px solid #0284c7;
+  color: #0c4a6e;
+}

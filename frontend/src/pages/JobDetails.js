@@ -41,9 +41,23 @@ function JobDetails() {
   const exportCSV = async () => {
     try {
       const token = localStorage.getItem('token');
-      window.open(`${API_URL}/jobs/${id}/export?token=${token}`, '_blank');
+      const response = await axios.get(`${API_URL}/jobs/${id}/export`, {
+        headers: { Authorization: `Bearer ${token}` },
+        responseType: 'blob'
+      });
+
+      // Criar um link temporário para download
+      const url = window.URL.createObjectURL(new Blob([response.data]));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `job-${id}-${Date.now()}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Erro ao exportar:', error);
+      alert('Erro ao exportar CSV');
     }
   };
 
@@ -258,13 +272,14 @@ function JobDetails() {
 
               {sim.error_message && (
                 <div className="simulation-error">
-                  <strong>Erro:</strong> {sim.error_message}
+                  <strong>❌ Erro:</strong> {sim.error_message}
                 </div>
               )}
 
               {sim.description && (
                 <div className="simulation-description">
-                  {sim.description}
+                  <strong>ℹ️ Retorno do Banco:</strong>
+                  <div style={{ marginTop: '5px' }}>{sim.description}</div>
                 </div>
               )}
             </div>
