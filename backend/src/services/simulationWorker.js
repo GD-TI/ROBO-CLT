@@ -463,6 +463,10 @@ retryQueue.process(3, async (job) => {
 
 // Função auxiliar para processar simulação (após consulta aprovada)
 async function processSimulation(client, simulationId, cpf, consultId) {
+  // Buscar informações da consulta para pegar o description
+  const consultStatus = await checkConsultStatus(client, cpf, consultId, simulationId);
+  const consultDescription = consultStatus.data?.description || null;
+
   console.log(`🧮 Calculando parcelas...`);
   const preCalcResult = await client.preCalculateInstallments(consultId);
   
@@ -563,7 +567,7 @@ async function processSimulation(client, simulationId, cpf, consultId) {
     best_installment_value: installmentFaceValue,
     best_disbursement_value: disbursementMaxValue,
     best_operation_value: operationValue,
-    description: 'Simulação realizada com sucesso',
+    description: consultDescription || 'Simulação realizada com sucesso',
   });
 
   console.log(`✅ Simulação #${simulationId} concluída com sucesso!`);
