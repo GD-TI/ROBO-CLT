@@ -93,8 +93,16 @@ function Jobs() {
   return (
     <div className="jobs-container">
       <div className="jobs-header">
+        <button
+          className="btn-back"
+          onClick={() => navigate('/')}
+          title="Voltar ao início"
+        >
+          ← Voltar
+        </button>
+
         <div className="pagination-info">
-          <button 
+          <button
             onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
             disabled={currentPage === 1}
             className="nav-button"
@@ -102,7 +110,7 @@ function Jobs() {
             ‹
           </button>
           <span>Página {currentPage} de {totalPages}</span>
-          <button 
+          <button
             onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
             disabled={currentPage === totalPages}
             className="nav-button"
@@ -110,8 +118,8 @@ function Jobs() {
             ›
           </button>
         </div>
-        
-        <button 
+
+        <button
           className="btn-new-job"
           onClick={() => navigate('/new-job')}
         >
