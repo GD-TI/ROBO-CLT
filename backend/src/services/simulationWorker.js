@@ -467,6 +467,17 @@ async function processSimulation(client, simulationId, cpf, consultId) {
   const consultStatus = await checkConsultStatus(client, cpf, consultId, simulationId);
   const consultDescription = consultStatus.data?.description || null;
 
+  // Registrar a chamada de busca de status nos logs
+  await logRequest(
+    simulationId,
+    '/private-consignment/consult',
+    'GET',
+    { cpf, consultId },
+    consultStatus.data || {},
+    200,
+    consultStatus.status === 'ERROR' ? 'Error fetching consult status' : null
+  );
+
   console.log(`🧮 Calculando parcelas...`);
   const preCalcResult = await client.preCalculateInstallments(consultId);
   
