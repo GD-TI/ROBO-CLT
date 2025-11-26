@@ -510,19 +510,19 @@ async function processSimulation(client, simulationId, cpf, consultId) {
     return { status: 'FAILED', message: 'Nenhuma parcela disponível' };
   }
 
-  const numberOfInstallments = bestInstallment.numberOfInstallments || 
-                               bestInstallment.number_of_installments ||
-                               bestInstallment.installments;
+  // Extrair valores do novo formato
+  const numberOfInstallments = parseInt(bestInstallment.installmentNumbers);
+  const installmentFaceValue = parseFloat(bestInstallment.maxInstallmentValue);
+  const disbursementMaxValue = parseFloat(bestInstallment.disbursementMaxValue);
+  const operationValue = parseFloat(bestInstallment.operationMaxValue);
 
-  const installmentFaceValue = bestInstallment.installmentFaceValue || 
-                              bestInstallment.installment_face_value ||
-                              bestInstallment.faceValue;
-
-  const disbursementMaxValue = bestInstallment.disbursementMaxValue ||
-                              bestInstallment.disbursement_max_value;
-
-  const operationValue = bestInstallment.operationValue ||
-                        bestInstallment.operation_value;
+  console.log('🔍 Valores extraídos:', {
+    numberOfInstallments,
+    installmentFaceValue,
+    disbursementMaxValue,
+    operationValue,
+    bestInstallment: JSON.stringify(bestInstallment)
+  });
 
   if (!numberOfInstallments || !installmentFaceValue) {
     console.error('❌ Campos obrigatórios faltando:', {

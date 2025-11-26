@@ -253,28 +253,20 @@ class BankAPIClient {
 
     const best = installments.reduce((best, current) => {
       if (!best) return current;
-      
-      // Suportar ambos os formatos (camelCase e snake_case)
-      const currentDisbursement = parseFloat(
-        current.disbursementMaxValue || 
-        current.disbursement_max_value || 
-        0
-      );
-      
-      const bestDisbursement = parseFloat(
-        best.disbursementMaxValue || 
-        best.disbursement_max_value || 
-        0
-      );
-      
+
+      // Usar o novo formato: disbursementMaxValue
+      const currentDisbursement = parseFloat(current.disbursementMaxValue || 0);
+      const bestDisbursement = parseFloat(best.disbursementMaxValue || 0);
+
       return currentDisbursement > bestDisbursement ? current : best;
     }, null);
 
     if (best) {
       console.log('✅ Melhor parcela selecionada:', {
-        numberOfInstallments: best.numberOfInstallments || best.number_of_installments,
-        installmentFaceValue: best.installmentFaceValue || best.installment_face_value,
-        disbursementMaxValue: best.disbursementMaxValue || best.disbursement_max_value
+        installmentNumbers: best.installmentNumbers,
+        maxInstallmentValue: best.maxInstallmentValue,
+        disbursementMaxValue: best.disbursementMaxValue,
+        operationMaxValue: best.operationMaxValue
       });
     }
 
