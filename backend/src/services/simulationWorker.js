@@ -146,6 +146,22 @@ async function canUserProcessJob(userId) {
   return active < limit;
 }
 
+async function checkJobStatus(jobId) {
+  try {
+    if (!jobId) return 'PROCESSING'; // Se não tem jobId, continuar
+
+    const result = await db.query(
+      'SELECT status FROM jobs WHERE id = $1',
+      [jobId]
+    );
+
+    return result.rows[0]?.status || 'PROCESSING';
+  } catch (error) {
+    console.error(`Erro ao verificar status do job ${jobId}:`, error.message);
+    return 'PROCESSING'; // Em caso de erro, continuar processando
+  }
+}
+
 function formatPhone(phone) {
   if (!phone) return { phoneNumber: '', countryCode: '55', areaCode: '' };
   
@@ -369,6 +385,23 @@ simulationQueue.process(MAX_CONCURRENT_SIMULATIONS, async (job) => {
   incrementActiveWorkers(userId);
 
   try {
+    // Verificar se o job foi pausado ou cancelado
+    const jobStatus = await checkJobStatus(jobId);
+    if (jobStatus === 'PAUSED') {
+      console.log(`⏸️  Job #${jobId} está pausado. Reenfileirando simulação...`);
+      await simulationQueue.add(job.data, { delay: 5000 });
+      return { status: 'REQUEUED', message: 'Job pausado' };
+    }
+    if (jobStatus === 'CANCELLED') {
+      console.log(`❌ Job #${jobId} foi cancelado. Parando simulação...`);
+      await updateSimulation(simulationId, {
+        status: 'FAILED',
+        error_message: 'Job cancelado pelo usuário',
+        description: 'Job foi cancelado'
+      });
+      return { status: 'CANCELLED', message: 'Job cancelado' };
+    }
+
     await updateSimulation(simulationId, { status: 'PROCESSING' });
 
     console.log(`📊 Buscando dados no SERASA...`);

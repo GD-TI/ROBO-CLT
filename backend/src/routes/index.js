@@ -18,6 +18,13 @@ router.use(authMiddleware);
 // Rotas de usuário
 router.get('/auth/me', authController.me);
 
+// Rotas de gerenciamento de usuários (apenas admin)
+const userController = require('../controllers/userController');
+router.get('/users', userController.list);
+router.post('/users', userController.create);
+router.put('/users/:id', userController.update);
+router.delete('/users/:id', userController.delete);
+
 // Rotas de credenciais bancárias
 router.post('/bank-credentials', bankCredentialController.create);
 router.get('/bank-credentials', bankCredentialController.list);
@@ -34,6 +41,9 @@ try {
   router.get('/jobs/stats', jobController.stats);
   router.get('/jobs/:id', jobController.get);
   router.get('/jobs/:id/export', jobController.exportCSV);
+  router.put('/jobs/:id/pause', jobController.pause);
+  router.put('/jobs/:id/resume', jobController.resume);
+  router.put('/jobs/:id/cancel', jobController.cancel);
   router.delete('/jobs/:id', jobController.delete);
   console.log('✅ Rotas de Jobs carregadas');
 } catch (error) {

@@ -242,15 +242,144 @@ class JobController {
     }
   }
 
+  // Pausar job
+  async pause(req, res) {
+    try {
+      const { id } = req.params;
+      const userId = req.user.id;
+
+      // Verificar se job pertence ao usuário
+      const jobResult = await db.query(
+        'SELECT * FROM jobs WHERE id = $1 AND user_id = $2',
+        [id, userId]
+      );
+
+      if (jobResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Job não encontrado' });
+      }
+
+      const job = jobResult.rows[0];
+
+      if (job.status !== 'PROCESSING') {
+        return res.status(400).json({
+          error: `Job não pode ser pausado. Status atual: ${job.status}`
+        });
+      }
+
+      // Atualizar status para PAUSED
+      await db.query(
+        'UPDATE jobs SET status = $1 WHERE id = $2',
+        ['PAUSED', id]
+      );
+
+      res.json({
+        message: 'Job pausado com sucesso',
+        jobId: id,
+        status: 'PAUSED'
+      });
+    } catch (error) {
+      console.error('Pause job error:', error);
+      res.status(500).json({ error: 'Erro ao pausar job' });
+    }
+  }
+
+  // Retomar job pausado
+  async resume(req, res) {
+    try {
+      const { id } = req.params;
+      const userId = req.user.id;
+
+      const jobResult = await db.query(
+        'SELECT * FROM jobs WHERE id = $1 AND user_id = $2',
+        [id, userId]
+      );
+
+      if (jobResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Job não encontrado' });
+      }
+
+      const job = jobResult.rows[0];
+
+      if (job.status !== 'PAUSED') {
+        return res.status(400).json({
+          error: `Job não pode ser retomado. Status atual: ${job.status}`
+        });
+      }
+
+      // Atualizar status para PROCESSING
+      await db.query(
+        'UPDATE jobs SET status = $1 WHERE id = $2',
+        ['PROCESSING', id]
+      );
+
+      res.json({
+        message: 'Job retomado com sucesso',
+        jobId: id,
+        status: 'PROCESSING'
+      });
+    } catch (error) {
+      console.error('Resume job error:', error);
+      res.status(500).json({ error: 'Erro ao retomar job' });
+    }
+  }
+
+  // Cancelar job
+  async cancel(req, res) {
+    try {
+      const { id } = req.params;
+      const userId = req.user.id;
+
+      const jobResult = await db.query(
+        'SELECT * FROM jobs WHERE id = $1 AND user_id = $2',
+        [id, userId]
+      );
+
+      if (jobResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Job não encontrado' });
+      }
+
+      const job = jobResult.rows[0];
+
+      if (job.status === 'COMPLETED' || job.status === 'CANCELLED') {
+        return res.status(400).json({
+          error: `Job não pode ser cancelado. Status atual: ${job.status}`
+        });
+      }
+
+      // Atualizar status para CANCELLED
+      await db.query(
+        'UPDATE jobs SET status = $1 WHERE id = $2',
+        ['CANCELLED', id]
+      );
+
+      // Cancelar simulações pendentes
+      await db.query(
+        `UPDATE simulations
+         SET status = 'FAILED', error_message = 'Job cancelado pelo usuário'
+         WHERE job_id = $1 AND status IN ('PENDING', 'PROCESSING')`,
+        [id]
+      );
+
+      res.json({
+        message: 'Job cancelado com sucesso',
+        jobId: id,
+        status: 'CANCELLED'
+      });
+    } catch (error) {
+      console.error('Cancel job error:', error);
+      res.status(500).json({ error: 'Erro ao cancelar job' });
+    }
+  }
+
   async createBulk(req, res) {
   const { name, cpfs } = req.body;
   const BATCH_SIZE = 500; // 500 CPFs por job
-  
+
   const batches = [];
   for (let i = 0; i < cpfs.length; i += BATCH_SIZE) {
     batches.push(cpfs.slice(i, i + BATCH_SIZE));
   }
-  
+
   // Criar múltiplos jobs
   for (let i = 0; i < batches.length; i++) {
     await this.create({
@@ -261,7 +390,7 @@ class JobController {
       user: req.user
     }, res);
   }
-  
+
   // 50.000 CPFs = 100 jobs de 500 CPFs cada
   }
 }

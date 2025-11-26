@@ -1,0 +1,11 @@
+-- Adicionar status PAUSED e CANCELLED para jobs
+
+ALTER TABLE jobs
+DROP CONSTRAINT IF EXISTS jobs_status_check;
+
+ALTER TABLE jobs
+ADD CONSTRAINT jobs_status_check
+CHECK (status IN ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'PAUSED', 'CANCELLED'));
+
+-- Comentário
+COMMENT ON COLUMN jobs.status IS 'Status: PENDING, PROCESSING, COMPLETED, FAILED, PAUSED, CANCELLED';
