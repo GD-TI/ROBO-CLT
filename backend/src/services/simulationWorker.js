@@ -183,6 +183,67 @@ async function updateSimulation(simulationId, data) {
   );
 }
 
+// Função para verificar se todas as simulações normais do job foram processadas
+async function checkAndRetryWaitingConsults(jobId) {
+  try {
+    // Buscar todas as simulações do job
+    const result = await db.query(
+      `SELECT status, id, cpf, bank_credential_id
+       FROM simulations
+       WHERE job_id = $1`,
+      [jobId]
+    );
+
+    const simulations = result.rows;
+
+    // Verificar se ainda há simulações PENDING ou PROCESSING
+    const stillProcessing = simulations.some(s =>
+      s.status === 'PENDING' || s.status === 'PROCESSING'
+    );
+
+    if (stillProcessing) {
+      console.log(`⏸️  Job #${jobId} ainda tem simulações pendentes. Aguardando...`);
+      return;
+    }
+
+    // Buscar todas as simulações WAITING_CONSULT
+    const waitingConsults = simulations.filter(s => s.status === 'WAITING_CONSULT');
+
+    if (waitingConsults.length === 0) {
+      console.log(`✅ Job #${jobId} concluído sem consultas em espera`);
+      return;
+    }
+
+    console.log(`🔄 Job #${jobId} - Reprocessando ${waitingConsults.length} consultas em espera...`);
+
+    // Buscar consult_id de cada simulação e adicionar na fila de retry
+    for (const sim of waitingConsults) {
+      const simDetails = await db.query(
+        `SELECT consult_id, user_id FROM simulations WHERE id = $1`,
+        [sim.id]
+      );
+
+      if (simDetails.rows.length > 0) {
+        const { consult_id, user_id } = simDetails.rows[0];
+
+        await retryQueue.add({
+          simulationId: sim.id,
+          cpf: sim.cpf,
+          consultId: consult_id,
+          bankCredentialId: sim.bank_credential_id,
+          userId: user_id,
+        }, {
+          delay: 5000, // 5 segundos apenas
+        });
+
+        console.log(`  ✅ Simulação #${sim.id} adicionada à fila de retry`);
+      }
+    }
+  } catch (error) {
+    console.error('Erro ao verificar consultas em espera:', error);
+  }
+}
+
 async function getCPFDataFromSerasa(cpf) {
   try {
     const result = await sqlServer.getCPFData([cpf]);
@@ -357,7 +418,7 @@ simulationQueue.process(5, async (job) => {
       }
     }
 
-    // ✅ SE AINDA WAITING_CONSULT, MARCAR E ADICIONAR NA FILA DE RETRY COM DELAY MAIOR
+    // ✅ SE AINDA WAITING_CONSULT, APENAS MARCAR (NÃO adicionar na fila ainda)
     if (consultStatus.status !== 'SUCCESS') {
       console.log(`⏸️  Consulta ainda aguardando (${consultStatus.status}). Será reprocessada após outras simulações...`);
 
@@ -366,32 +427,35 @@ simulationQueue.process(5, async (job) => {
         description: `Aguardando resposta do banco - Status: ${consultStatus.status}`,
       });
 
-      // Adicionar na fila de retry com delay de 5 minutos
-      // Isso permite que outras simulações sejam processadas primeiro
-      await retryQueue.add({
-        simulationId,
-        cpf,
-        consultId,
-        bankCredentialId,
-        userId,
-      }, {
-        delay: 300000, // 5 minutos (300 segundos)
-      });
+      // NÃO adicionar na fila de retry agora
+      // Será adicionado quando todas as outras simulações do job terminarem
 
-      return { status: 'WAITING_CONSULT', message: 'Adicionado à fila de retry com delay' };
+      return { status: 'WAITING_CONSULT', message: 'Marcado para retry posterior' };
     }
 
     // ✅ CONTINUAR NORMALMENTE SE JÁ ESTÁ SUCCESS
-    return await processSimulation(client, simulationId, cpf, consultId);
+    const result = await processSimulation(client, simulationId, cpf, consultId);
+
+    // Verificar se há consultas WAITING_CONSULT para reprocessar
+    if (jobId) {
+      await checkAndRetryWaitingConsults(jobId);
+    }
+
+    return result;
 
   } catch (error) {
     console.error(`❌ Erro na simulação #${simulationId}:`, error);
-    
+
     await updateSimulation(simulationId, {
       status: 'FAILED',
       error_message: error.message,
       description: 'Erro no processamento',
     });
+
+    // Verificar se há consultas WAITING_CONSULT para reprocessar
+    if (jobId) {
+      await checkAndRetryWaitingConsults(jobId);
+    }
 
     return { status: 'FAILED', message: error.message };
   }
