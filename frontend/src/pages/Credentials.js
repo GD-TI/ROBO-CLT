@@ -19,6 +19,8 @@ function Credentials() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [jsonInput, setJsonInput] = useState('');
+  const [showJsonForm, setShowJsonForm] = useState(false);
 
   useEffect(() => {
     loadCredentials();
@@ -77,6 +79,47 @@ function Credentials() {
     }
   };
 
+  const handleJsonSubmit = async (e) => {
+    e.preventDefault();
+    setError('');
+    setSuccess('');
+    setSubmitting(true);
+
+    try {
+      // Parse do JSON
+      const parsed = JSON.parse(jsonInput);
+
+      // Validar se tem username e password
+      if (!parsed.username || !parsed.password) {
+        throw new Error('JSON deve conter "username" e "password"');
+      }
+
+      // Criar credencial com dados do JSON
+      const credentialData = {
+        partner_id: '7718_D020', // Partner ID padrão
+        name: parsed.username.split('@')[0], // Usar parte antes do @ como nome
+        email: parsed.username,
+        password: parsed.password,
+      };
+
+      await credentialService.create(credentialData);
+      setSuccess('Credencial criada com sucesso a partir do JSON!');
+      setJsonInput('');
+      setShowJsonForm(false);
+      loadCredentials();
+    } catch (err) {
+      if (err instanceof SyntaxError) {
+        setError('JSON inválido. Verifique o formato.');
+      } else if (err.message.includes('username') || err.message.includes('password')) {
+        setError(err.message);
+      } else {
+        setError(err.response?.data?.error || 'Erro ao criar credencial');
+      }
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
   return (
     <div className="dashboard">
       <header className="dashboard-header">
@@ -113,9 +156,26 @@ function Credentials() {
       <div className="dashboard-content">
         <div className="page-header">
           <h2>Credenciais Bancárias</h2>
-          <button onClick={() => setShowForm(!showForm)} className="btn-primary">
-            {showForm ? '✕ Cancelar' : '➕ Adicionar Credencial'}
-          </button>
+          <div style={{ display: 'flex', gap: '10px' }}>
+            <button
+              onClick={() => {
+                setShowForm(!showForm);
+                setShowJsonForm(false);
+              }}
+              className="btn-primary"
+            >
+              {showForm ? '✕ Cancelar' : '➕ Formulário'}
+            </button>
+            <button
+              onClick={() => {
+                setShowJsonForm(!showJsonForm);
+                setShowForm(false);
+              }}
+              className="btn-primary"
+            >
+              {showJsonForm ? '✕ Cancelar' : '📝 Adicionar JSON'}
+            </button>
+          </div>
         </div>
 
         {error && <div className="error-message">{error}</div>}
@@ -175,6 +235,39 @@ function Credentials() {
 
               <button type="submit" disabled={submitting} className="btn-primary">
                 {submitting ? 'Salvando...' : 'Salvar Credencial'}
+              </button>
+            </form>
+          </div>
+        )}
+
+        {showJsonForm && (
+          <div className="credential-form">
+            <h3>Adicionar Credencial via JSON</h3>
+            <p style={{ marginBottom: '15px', color: '#666' }}>
+              Cole o JSON no formato: <code>{`{"username": "email@gmail.com", "password": "senha"}`}</code>
+            </p>
+            <form onSubmit={handleJsonSubmit}>
+              <div className="form-group">
+                <label>JSON da Credencial</label>
+                <textarea
+                  value={jsonInput}
+                  onChange={(e) => setJsonInput(e.target.value)}
+                  required
+                  rows="6"
+                  placeholder='{"username": "email@gmail.com", "password": "senha123"}'
+                  style={{
+                    width: '100%',
+                    fontFamily: 'monospace',
+                    fontSize: '14px',
+                    padding: '10px',
+                    border: '1px solid #ddd',
+                    borderRadius: '4px',
+                    resize: 'vertical'
+                  }}
+                />
+              </div>
+              <button type="submit" disabled={submitting} className="btn-primary">
+                {submitting ? 'Salvando...' : 'Criar Credencial do JSON'}
               </button>
             </form>
           </div>
