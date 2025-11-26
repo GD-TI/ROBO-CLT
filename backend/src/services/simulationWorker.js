@@ -28,9 +28,18 @@ if (process.env.REDIS_TLS === 'true') {
 const MAX_CONCURRENT_SIMULATIONS = parseInt(process.env.MAX_CONCURRENT_SIMULATIONS) || 120;
 const MAX_CONCURRENT_RETRIES = parseInt(process.env.MAX_CONCURRENT_RETRIES) || 60;
 
+// Configuração de workers por tipo de usuário
+const ADMIN_WORKERS_PER_USER = parseInt(process.env.ADMIN_WORKERS_PER_USER) || 60;
+const REGULAR_WORKERS_PER_USER = parseInt(process.env.REGULAR_WORKERS_PER_USER) || 20;
+
+// Rastreamento de workers ativos por usuário
+const activeWorkersByUser = new Map(); // userId -> count
+
 console.log(`⚙️  Configuração de Workers:`);
-console.log(`   - Simulações simultâneas: ${MAX_CONCURRENT_SIMULATIONS}`);
+console.log(`   - Simulações simultâneas (total): ${MAX_CONCURRENT_SIMULATIONS}`);
 console.log(`   - Retries simultâneos: ${MAX_CONCURRENT_RETRIES}`);
+console.log(`   - Workers por usuário admin: ${ADMIN_WORKERS_PER_USER}`);
+console.log(`   - Workers por usuário regular: ${REGULAR_WORKERS_PER_USER}`);
 
 // Fila principal
 const simulationQueue = new Queue('simulation-queue', {
@@ -92,6 +101,49 @@ retryQueue.on('failed', (job, err) => {
 
 async function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+// Funções de controle de concorrência por usuário
+async function getUserRole(userId) {
+  try {
+    const result = await db.query(
+      'SELECT role FROM users WHERE id = $1',
+      [userId]
+    );
+    return result.rows[0]?.role || 'regular';
+  } catch (error) {
+    console.error(`Erro ao buscar role do usuário ${userId}:`, error.message);
+    return 'regular'; // Default para regular em caso de erro
+  }
+}
+
+function getUserWorkerLimit(role) {
+  return role === 'admin' ? ADMIN_WORKERS_PER_USER : REGULAR_WORKERS_PER_USER;
+}
+
+function getActiveWorkerCount(userId) {
+  return activeWorkersByUser.get(userId) || 0;
+}
+
+function incrementActiveWorkers(userId) {
+  const current = getActiveWorkerCount(userId);
+  activeWorkersByUser.set(userId, current + 1);
+  console.log(`👤 Usuário #${userId}: ${current + 1} workers ativos`);
+}
+
+function decrementActiveWorkers(userId) {
+  const current = getActiveWorkerCount(userId);
+  if (current > 0) {
+    activeWorkersByUser.set(userId, current - 1);
+    console.log(`👤 Usuário #${userId}: ${current - 1} workers ativos`);
+  }
+}
+
+async function canUserProcessJob(userId) {
+  const role = await getUserRole(userId);
+  const limit = getUserWorkerLimit(role);
+  const active = getActiveWorkerCount(userId);
+  return active < limit;
 }
 
 function formatPhone(phone) {
@@ -300,7 +352,21 @@ async function checkConsultStatus(client, cpf, consultId, simulationId) {
 simulationQueue.process(MAX_CONCURRENT_SIMULATIONS, async (job) => {
   const { simulationId, cpf, bankCredentialId, userId, jobId } = job.data;
 
-  console.log(`\n🔄 Iniciando processamento - Simulação #${simulationId} - CPF: ${cpf}`);
+  console.log(`\n🔄 Iniciando processamento - Simulação #${simulationId} - CPF: ${cpf} - Usuário #${userId}`);
+
+  // Verificar se o usuário pode processar mais jobs
+  const canProcess = await canUserProcessJob(userId);
+  if (!canProcess) {
+    const role = await getUserRole(userId);
+    const limit = getUserWorkerLimit(role);
+    console.log(`⏸️  Usuário #${userId} atingiu o limite de ${limit} workers. Reenfileirando job...`);
+    // Recolocar job na fila com pequeno delay
+    await simulationQueue.add(job.data, { delay: 2000 });
+    return { status: 'REQUEUED', message: 'Usuário atingiu limite de workers' };
+  }
+
+  // Incrementar contador de workers ativos para este usuário
+  incrementActiveWorkers(userId);
 
   try {
     await updateSimulation(simulationId, { status: 'PROCESSING' });
@@ -466,6 +532,9 @@ simulationQueue.process(MAX_CONCURRENT_SIMULATIONS, async (job) => {
     }
 
     return { status: 'FAILED', message: error.message };
+  } finally {
+    // Sempre decrementar o contador ao finalizar (sucesso ou erro)
+    decrementActiveWorkers(userId);
   }
 });
 
