@@ -37,7 +37,7 @@ function Jobs() {
     }
   };
 
-  const exportCSV = async (jobId) => {
+  const exportExcel = async (jobId) => {
     try {
       const token = localStorage.getItem('token');
       const response = await axios.get(`${API_URL}/jobs/${jobId}/export`, {
@@ -49,14 +49,14 @@ function Jobs() {
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `job-${jobId}-${Date.now()}.csv`);
+      link.setAttribute('download', `job-${jobId}-${Date.now()}.xlsx`);
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Erro ao exportar:', error);
-      alert('Erro ao exportar CSV');
+      alert('Erro ao exportar Excel');
     }
   };
 
@@ -332,10 +332,10 @@ function Jobs() {
 
                 <button
                   className="action-btn"
-                  onClick={() => exportCSV(job.id)}
-                  title="Exportar CSV"
+                  onClick={() => exportExcel(job.id)}
+                  title="Exportar Excel"
                 >
-                  <span>📥</span>
+                  <span>📊</span>
                 </button>
               </div>
             </div>
