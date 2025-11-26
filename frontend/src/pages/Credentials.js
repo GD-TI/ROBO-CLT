@@ -86,35 +86,73 @@ function Credentials() {
     setSubmitting(true);
 
     try {
-      // Parse do JSON
-      const parsed = JSON.parse(jsonInput);
+      // Dividir por linhas e filtrar linhas vazias
+      const lines = jsonInput
+        .split('\n')
+        .map(line => line.trim())
+        .filter(line => line.length > 0);
 
-      // Validar se tem username e password
-      if (!parsed.username || !parsed.password) {
-        throw new Error('JSON deve conter "username" e "password"');
+      if (lines.length === 0) {
+        throw new Error('Nenhuma credencial fornecida');
       }
 
-      // Criar credencial com dados do JSON
-      const credentialData = {
-        partner_id: '7718_D020', // Partner ID padrão
-        name: parsed.username.split('@')[0], // Usar parte antes do @ como nome
-        email: parsed.username,
-        password: parsed.password,
+      const results = {
+        success: 0,
+        failed: 0,
+        errors: []
       };
 
-      await credentialService.create(credentialData);
-      setSuccess('Credencial criada com sucesso a partir do JSON!');
-      setJsonInput('');
-      setShowJsonForm(false);
+      // Processar cada linha
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        const lineNum = i + 1;
+
+        try {
+          // Parse do JSON
+          const parsed = JSON.parse(line);
+
+          // Validar se tem username e password
+          if (!parsed.username || !parsed.password) {
+            throw new Error(`Linha ${lineNum}: JSON deve conter "username" e "password"`);
+          }
+
+          // Criar credencial com dados do JSON
+          const credentialData = {
+            partner_id: '7718_D020', // Partner ID padrão
+            name: parsed.username.split('@')[0], // Usar parte antes do @ como nome
+            email: parsed.username,
+            password: parsed.password,
+          };
+
+          await credentialService.create(credentialData);
+          results.success++;
+        } catch (err) {
+          results.failed++;
+          if (err instanceof SyntaxError) {
+            results.errors.push(`Linha ${lineNum}: JSON inválido`);
+          } else if (err.message.includes('username') || err.message.includes('password')) {
+            results.errors.push(err.message);
+          } else {
+            results.errors.push(`Linha ${lineNum}: ${err.response?.data?.error || err.message}`);
+          }
+        }
+      }
+
+      // Mostrar resultado
+      if (results.success > 0 && results.failed === 0) {
+        setSuccess(`✅ ${results.success} credencial(is) criada(s) com sucesso!`);
+        setJsonInput('');
+        setShowJsonForm(false);
+      } else if (results.success > 0 && results.failed > 0) {
+        setSuccess(`⚠️ ${results.success} criada(s), ${results.failed} falharam`);
+        setError(results.errors.join('\n'));
+      } else {
+        setError(`❌ Todas as ${results.failed} tentativas falharam:\n${results.errors.join('\n')}`);
+      }
+
       loadCredentials();
     } catch (err) {
-      if (err instanceof SyntaxError) {
-        setError('JSON inválido. Verifique o formato.');
-      } else if (err.message.includes('username') || err.message.includes('password')) {
-        setError(err.message);
-      } else {
-        setError(err.response?.data?.error || 'Erro ao criar credencial');
-      }
+      setError(err.message || 'Erro ao processar credenciais');
     } finally {
       setSubmitting(false);
     }
@@ -242,19 +280,20 @@ function Credentials() {
 
         {showJsonForm && (
           <div className="credential-form">
-            <h3>Adicionar Credencial via JSON</h3>
+            <h3>Adicionar Credenciais via JSON</h3>
             <p style={{ marginBottom: '15px', color: '#666' }}>
-              Cole o JSON no formato: <code>{`{"username": "email@gmail.com", "password": "senha"}`}</code>
+              Cole um ou mais JSONs, <strong>um por linha</strong>:<br />
+              <code>{`{"username": "email@gmail.com", "password": "senha"}`}</code>
             </p>
             <form onSubmit={handleJsonSubmit}>
               <div className="form-group">
-                <label>JSON da Credencial</label>
+                <label>JSON das Credenciais (uma por linha)</label>
                 <textarea
                   value={jsonInput}
                   onChange={(e) => setJsonInput(e.target.value)}
                   required
-                  rows="6"
-                  placeholder='{"username": "email@gmail.com", "password": "senha123"}'
+                  rows="8"
+                  placeholder={'{"username": "email1@gmail.com", "password": "senha123"}\n{"username": "email2@gmail.com", "password": "senha456"}\n{"username": "email3@gmail.com", "password": "senha789"}'}
                   style={{
                     width: '100%',
                     fontFamily: 'monospace',
@@ -267,7 +306,7 @@ function Credentials() {
                 />
               </div>
               <button type="submit" disabled={submitting} className="btn-primary">
-                {submitting ? 'Salvando...' : 'Criar Credencial do JSON'}
+                {submitting ? 'Salvando...' : 'Criar Credenciais'}
               </button>
             </form>
           </div>
