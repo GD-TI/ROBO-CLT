@@ -28,22 +28,6 @@ function Home() {
       icon: '🏦',
       color: '#10b981',
       path: '/simulations'
-    },
-    {
-      id: 'credentials',
-      title: 'Credenciais',
-      description: 'Gerenciar credenciais bancárias',
-      icon: '🔑',
-      color: '#f59e0b',
-      path: '/credentials'
-    },
-    {
-      id: 'dashboard',
-      title: 'Dashboard',
-      description: 'Visão geral e estatísticas',
-      icon: '📊',
-      color: '#8b5cf6',
-      path: '/dashboard'
     }
   ];
 

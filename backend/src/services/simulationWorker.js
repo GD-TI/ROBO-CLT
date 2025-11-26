@@ -24,6 +24,14 @@ if (process.env.REDIS_TLS === 'true') {
   redisConfig.tls = {};
 }
 
+// Configuração de concorrência (workers simultâneos)
+const MAX_CONCURRENT_SIMULATIONS = parseInt(process.env.MAX_CONCURRENT_SIMULATIONS) || 120;
+const MAX_CONCURRENT_RETRIES = parseInt(process.env.MAX_CONCURRENT_RETRIES) || 60;
+
+console.log(`⚙️  Configuração de Workers:`);
+console.log(`   - Simulações simultâneas: ${MAX_CONCURRENT_SIMULATIONS}`);
+console.log(`   - Retries simultâneos: ${MAX_CONCURRENT_RETRIES}`);
+
 // Fila principal
 const simulationQueue = new Queue('simulation-queue', {
   redis: redisConfig,
@@ -289,7 +297,7 @@ async function checkConsultStatus(client, cpf, consultId, simulationId) {
 }
 
 // Worker principal - Processa novas simulações
-simulationQueue.process(5, async (job) => {
+simulationQueue.process(MAX_CONCURRENT_SIMULATIONS, async (job) => {
   const { simulationId, cpf, bankCredentialId, userId } = job.data;
 
   console.log(`\n🔄 Iniciando processamento - Simulação #${simulationId} - CPF: ${cpf}`);
@@ -462,7 +470,7 @@ simulationQueue.process(5, async (job) => {
 });
 
 // Worker de retry - Processa simulações em WAITING_CONSULT
-retryQueue.process(3, async (job) => {
+retryQueue.process(MAX_CONCURRENT_RETRIES, async (job) => {
   const { simulationId, cpf, consultId, bankCredentialId, userId } = job.data;
 
   console.log(`\n🔁 Retry #${job.attemptsMade + 1}/10 - Simulação #${simulationId} - CPF: ${cpf}`);
@@ -649,5 +657,49 @@ async function processSimulation(client, simulationId, cpf, consultId) {
   console.log(`✅ Simulação #${simulationId} concluída com sucesso!`);
   return { status: 'COMPLETED', message: 'Simulação concluída com sucesso' };
 }
+
+// Monitoramento de filas - Log a cada 60 segundos
+async function logQueueStatus() {
+  try {
+    const [simWaiting, simActive, simCompleted, simFailed] = await Promise.all([
+      simulationQueue.getWaitingCount(),
+      simulationQueue.getActiveCount(),
+      simulationQueue.getCompletedCount(),
+      simulationQueue.getFailedCount(),
+    ]);
+
+    const [retryWaiting, retryActive] = await Promise.all([
+      retryQueue.getWaitingCount(),
+      retryQueue.getActiveCount(),
+    ]);
+
+    const totalPending = simWaiting + retryWaiting;
+    const totalActive = simActive + retryActive;
+
+    if (totalPending > 0 || totalActive > 0) {
+      console.log('\n📊 Status das Filas:');
+      console.log(`   Simulações: ${simActive} processando | ${simWaiting} aguardando | ✅ ${simCompleted} | ❌ ${simFailed}`);
+      console.log(`   Retries: ${retryActive} processando | ${retryWaiting} aguardando`);
+      console.log(`   Total: ${totalActive} ativos | ${totalPending} pendentes`);
+
+      // Calcular tempo estimado (assumindo 15s por simulação)
+      if (totalPending > 0) {
+        const avgTimePerSim = 15; // segundos
+        const estimatedSeconds = (totalPending / MAX_CONCURRENT_SIMULATIONS) * avgTimePerSim;
+        const estimatedMinutes = Math.ceil(estimatedSeconds / 60);
+        const estimatedHours = (estimatedMinutes / 60).toFixed(1);
+        console.log(`   ⏱️  Tempo estimado: ${estimatedMinutes} minutos (~${estimatedHours}h)`);
+      }
+    }
+  } catch (error) {
+    console.error('Erro ao obter status das filas:', error.message);
+  }
+}
+
+// Executar monitoramento a cada 60 segundos
+setInterval(logQueueStatus, 60000);
+
+// Log inicial após 5 segundos
+setTimeout(logQueueStatus, 5000);
 
 module.exports = { simulationQueue, retryQueue };
