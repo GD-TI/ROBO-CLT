@@ -64,4 +64,25 @@ export const simulationService = {
   delete: (id) => api.delete(`/simulations/${id}`),
 };
 
+// Jobs
+export const jobService = {
+  create: (data) => api.post('/jobs', data),
+  list: () => api.get('/jobs'),
+  get: (id) => api.get(`/jobs/${id}`),
+  stats: () => api.get('/jobs/stats'),
+  exportCSV: (id) => api.get(`/jobs/${id}/export`, { responseType: 'blob' }),
+  pause: (id) => api.put(`/jobs/${id}/pause`),
+  resume: (id) => api.put(`/jobs/${id}/resume`),
+  cancel: (id) => api.put(`/jobs/${id}/cancel`),
+  delete: (id) => api.delete(`/jobs/${id}`),
+};
+
+// Users (Admin only)
+export const userService = {
+  list: () => api.get('/users'),
+  create: (data) => api.post('/users', data),
+  update: (id, data) => api.put(`/users/${id}`, data),
+  delete: (id) => api.delete(`/users/${id}`),
+};
+
 export default api;

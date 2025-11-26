@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import axios from 'axios';
+import { jobService } from '../services/api';
 import '../styles/Jobs.css';
 
 const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000/api';
@@ -36,7 +37,7 @@ function Jobs() {
     }
   };
 
-  const exportCSV = async (jobId) => {
+  const exportExcel = async (jobId) => {
     try {
       const token = localStorage.getItem('token');
       const response = await axios.get(`${API_URL}/jobs/${jobId}/export`, {
@@ -48,20 +49,20 @@ function Jobs() {
       const url = window.URL.createObjectURL(new Blob([response.data]));
       const link = document.createElement('a');
       link.href = url;
-      link.setAttribute('download', `job-${jobId}-${Date.now()}.csv`);
+      link.setAttribute('download', `job-${jobId}-${Date.now()}.xlsx`);
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
     } catch (error) {
       console.error('Erro ao exportar:', error);
-      alert('Erro ao exportar CSV');
+      alert('Erro ao exportar Excel');
     }
   };
 
   const deleteJob = async (jobId) => {
     if (!window.confirm('Tem certeza que deseja deletar este job?')) return;
-    
+
     try {
       const token = localStorage.getItem('token');
       await axios.delete(`${API_URL}/jobs/${jobId}`, {
@@ -70,6 +71,38 @@ function Jobs() {
       loadJobs();
     } catch (error) {
       console.error('Erro ao deletar:', error);
+    }
+  };
+
+  const pauseJob = async (jobId) => {
+    try {
+      await jobService.pause(jobId);
+      loadJobs();
+    } catch (error) {
+      console.error('Erro ao pausar:', error);
+      alert(error.response?.data?.error || 'Erro ao pausar job');
+    }
+  };
+
+  const resumeJob = async (jobId) => {
+    try {
+      await jobService.resume(jobId);
+      loadJobs();
+    } catch (error) {
+      console.error('Erro ao retomar:', error);
+      alert(error.response?.data?.error || 'Erro ao retomar job');
+    }
+  };
+
+  const cancelJob = async (jobId) => {
+    if (!window.confirm('Tem certeza que deseja cancelar este job? Esta ação não pode ser desfeita.')) return;
+
+    try {
+      await jobService.cancel(jobId);
+      loadJobs();
+    } catch (error) {
+      console.error('Erro ao cancelar:', error);
+      alert(error.response?.data?.error || 'Erro ao cancelar job');
     }
   };
 
@@ -82,8 +115,22 @@ function Jobs() {
     switch (status) {
       case 'COMPLETED': return '#10b981';
       case 'PROCESSING': return '#3b82f6';
+      case 'PAUSED': return '#f59e0b';
+      case 'CANCELLED': return '#ef4444';
       case 'FAILED': return '#ef4444';
       default: return '#6b7280';
+    }
+  };
+
+  const getStatusLabel = (status) => {
+    switch (status) {
+      case 'COMPLETED': return 'Finalizado';
+      case 'PROCESSING': return 'Processando';
+      case 'PAUSED': return 'Pausado';
+      case 'CANCELLED': return 'Cancelado';
+      case 'FAILED': return 'Falhou';
+      case 'PENDING': return 'Pendente';
+      default: return status;
     }
   };
 
@@ -176,13 +223,11 @@ function Jobs() {
               {/* Status */}
               <div className="status-row">
                 <span className="status-label">Robos {job.completed_count}/{job.total_cpfs}</span>
-                <span 
+                <span
                   className="status-badge"
                   style={{ color: statusColor }}
                 >
-                  {job.status === 'COMPLETED' ? 'Finalizado' : 
-                   job.status === 'PROCESSING' ? 'Processando' : 
-                   job.status}
+                  {getStatusLabel(job.status)}
                 </span>
               </div>
 
@@ -238,36 +283,59 @@ function Jobs() {
 
               {/* Ações */}
               <div className="actions-row">
-                <button 
+                <button
                   className="action-btn"
                   onClick={() => navigate(`/jobs/${job.id}`)}
                   title="Visualizar detalhes"
                 >
                   <span>👁️</span>
                 </button>
-                
-                <button 
-                  className="action-btn"
-                  onClick={() => navigate(`/jobs/${job.id}`)}
-                  title="Editar"
-                >
-                  <span>✏️</span>
-                </button>
-                
-                <button 
+
+                {/* Botões de Controle */}
+                {job.status === 'PROCESSING' && (
+                  <button
+                    className="action-btn action-pause"
+                    onClick={() => pauseJob(job.id)}
+                    title="Pausar job"
+                  >
+                    <span>⏸️</span>
+                  </button>
+                )}
+
+                {job.status === 'PAUSED' && (
+                  <button
+                    className="action-btn action-resume"
+                    onClick={() => resumeJob(job.id)}
+                    title="Retomar job"
+                  >
+                    <span>▶️</span>
+                  </button>
+                )}
+
+                {(job.status === 'PROCESSING' || job.status === 'PAUSED') && (
+                  <button
+                    className="action-btn action-cancel"
+                    onClick={() => cancelJob(job.id)}
+                    title="Cancelar job"
+                  >
+                    <span>⛔</span>
+                  </button>
+                )}
+
+                <button
                   className="action-btn action-delete"
                   onClick={() => deleteJob(job.id)}
                   title="Deletar"
                 >
                   <span>🗑️</span>
                 </button>
-                
-                <button 
+
+                <button
                   className="action-btn"
-                  onClick={() => exportCSV(job.id)}
-                  title="Exportar CSV"
+                  onClick={() => exportExcel(job.id)}
+                  title="Exportar Excel"
                 >
-                  <span>📥</span>
+                  <span>📊</span>
                 </button>
               </div>
             </div>

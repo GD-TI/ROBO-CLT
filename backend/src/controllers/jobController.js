@@ -1,5 +1,6 @@
 const db = require('../config/database');
 const { simulationQueue } = require('../services/simulationWorker');
+const XLSX = require('xlsx');
 
 class JobController {
   // Criar novo job com round-robin de credenciais (ASSÍNCRONO)
@@ -147,15 +148,15 @@ class JobController {
     }
   }
 
-  // Exportar resultados do job em CSV
+  // Exportar resultados do job em XLSX (Excel)
   async exportCSV(req, res) {
     try {
       const { id } = req.params;
       const userId = req.user.id;
 
       const simulations = await db.query(
-        `SELECT s.cpf, s.name, s.status, s.best_disbursement_value, 
-                s.best_installment_numbers, s.best_installment_value, 
+        `SELECT s.cpf, s.name, s.status, s.best_disbursement_value,
+                s.best_installment_numbers, s.best_installment_value,
                 s.description, s.error_message, bc.name as credential_name
          FROM simulations s
          JOIN jobs j ON s.job_id = j.id
@@ -169,29 +170,50 @@ class JobController {
         return res.status(404).json({ error: 'Job não encontrado ou sem simulações' });
       }
 
-      // Gerar CSV com BOM UTF-8
-      let csv = 'CPF,Nome,Status,Valor Desembolso,Num Parcelas,Valor Parcela,Credencial Usada,Descrição,Erro\n';
-      
-      simulations.rows.forEach(row => {
-        const cpf = row.cpf || '';
-        const name = (row.name || '').replace(/"/g, '""');
-        const status = row.status || '';
-        const disbursement = row.best_disbursement_value || '';
-        const installments = row.best_installment_numbers || '';
-        const installmentValue = row.best_installment_value || '';
-        const credential = (row.credential_name || '').replace(/"/g, '""');
-        const description = (row.description || '').replace(/"/g, '""');
-        const error = (row.error_message || '').replace(/"/g, '""');
-        
-        csv += `"${cpf}","${name}","${status}","${disbursement}","${installments}","${installmentValue}","${credential}","${description}","${error}"\n`;
-      });
+      // Preparar dados para XLSX
+      const data = simulations.rows.map(row => ({
+        'CPF': row.cpf || '',
+        'Nome': row.name || '',
+        'Status': row.status || '',
+        'Valor Desembolso': row.best_disbursement_value || '',
+        'Num Parcelas': row.best_installment_numbers || '',
+        'Valor Parcela': row.best_installment_value || '',
+        'Credencial Usada': row.credential_name || '',
+        'Descrição': row.description || '',
+        'Erro': row.error_message || ''
+      }));
 
-      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
-      res.setHeader('Content-Disposition', `attachment; filename="job-${id}-${Date.now()}.csv"`);
-      res.send('\uFEFF' + csv); // BOM para UTF-8
+      // Criar workbook e worksheet
+      const wb = XLSX.utils.book_new();
+      const ws = XLSX.utils.json_to_sheet(data);
+
+      // Ajustar largura das colunas
+      const colWidths = [
+        { wch: 15 }, // CPF
+        { wch: 30 }, // Nome
+        { wch: 12 }, // Status
+        { wch: 15 }, // Valor Desembolso
+        { wch: 12 }, // Num Parcelas
+        { wch: 15 }, // Valor Parcela
+        { wch: 20 }, // Credencial Usada
+        { wch: 40 }, // Descrição
+        { wch: 40 }  // Erro
+      ];
+      ws['!cols'] = colWidths;
+
+      // Adicionar worksheet ao workbook
+      XLSX.utils.book_append_sheet(wb, ws, 'Simulações');
+
+      // Gerar buffer
+      const buffer = XLSX.write(wb, { type: 'buffer', bookType: 'xlsx' });
+
+      // Enviar arquivo
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+      res.setHeader('Content-Disposition', `attachment; filename="job-${id}-${Date.now()}.xlsx"`);
+      res.send(buffer);
     } catch (error) {
-      console.error('Export CSV error:', error);
-      res.status(500).json({ error: 'Erro ao exportar CSV' });
+      console.error('Export XLSX error:', error);
+      res.status(500).json({ error: 'Erro ao exportar arquivo' });
     }
   }
 
@@ -242,15 +264,144 @@ class JobController {
     }
   }
 
+  // Pausar job
+  async pause(req, res) {
+    try {
+      const { id } = req.params;
+      const userId = req.user.id;
+
+      // Verificar se job pertence ao usuário
+      const jobResult = await db.query(
+        'SELECT * FROM jobs WHERE id = $1 AND user_id = $2',
+        [id, userId]
+      );
+
+      if (jobResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Job não encontrado' });
+      }
+
+      const job = jobResult.rows[0];
+
+      if (job.status !== 'PROCESSING') {
+        return res.status(400).json({
+          error: `Job não pode ser pausado. Status atual: ${job.status}`
+        });
+      }
+
+      // Atualizar status para PAUSED
+      await db.query(
+        'UPDATE jobs SET status = $1 WHERE id = $2',
+        ['PAUSED', id]
+      );
+
+      res.json({
+        message: 'Job pausado com sucesso',
+        jobId: id,
+        status: 'PAUSED'
+      });
+    } catch (error) {
+      console.error('Pause job error:', error);
+      res.status(500).json({ error: 'Erro ao pausar job' });
+    }
+  }
+
+  // Retomar job pausado
+  async resume(req, res) {
+    try {
+      const { id } = req.params;
+      const userId = req.user.id;
+
+      const jobResult = await db.query(
+        'SELECT * FROM jobs WHERE id = $1 AND user_id = $2',
+        [id, userId]
+      );
+
+      if (jobResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Job não encontrado' });
+      }
+
+      const job = jobResult.rows[0];
+
+      if (job.status !== 'PAUSED') {
+        return res.status(400).json({
+          error: `Job não pode ser retomado. Status atual: ${job.status}`
+        });
+      }
+
+      // Atualizar status para PROCESSING
+      await db.query(
+        'UPDATE jobs SET status = $1 WHERE id = $2',
+        ['PROCESSING', id]
+      );
+
+      res.json({
+        message: 'Job retomado com sucesso',
+        jobId: id,
+        status: 'PROCESSING'
+      });
+    } catch (error) {
+      console.error('Resume job error:', error);
+      res.status(500).json({ error: 'Erro ao retomar job' });
+    }
+  }
+
+  // Cancelar job
+  async cancel(req, res) {
+    try {
+      const { id } = req.params;
+      const userId = req.user.id;
+
+      const jobResult = await db.query(
+        'SELECT * FROM jobs WHERE id = $1 AND user_id = $2',
+        [id, userId]
+      );
+
+      if (jobResult.rows.length === 0) {
+        return res.status(404).json({ error: 'Job não encontrado' });
+      }
+
+      const job = jobResult.rows[0];
+
+      if (job.status === 'COMPLETED' || job.status === 'CANCELLED') {
+        return res.status(400).json({
+          error: `Job não pode ser cancelado. Status atual: ${job.status}`
+        });
+      }
+
+      // Atualizar status para CANCELLED
+      await db.query(
+        'UPDATE jobs SET status = $1 WHERE id = $2',
+        ['CANCELLED', id]
+      );
+
+      // Cancelar simulações pendentes
+      await db.query(
+        `UPDATE simulations
+         SET status = 'FAILED', error_message = 'Job cancelado pelo usuário'
+         WHERE job_id = $1 AND status IN ('PENDING', 'PROCESSING')`,
+        [id]
+      );
+
+      res.json({
+        message: 'Job cancelado com sucesso',
+        jobId: id,
+        status: 'CANCELLED'
+      });
+    } catch (error) {
+      console.error('Cancel job error:', error);
+      res.status(500).json({ error: 'Erro ao cancelar job' });
+    }
+  }
+
   async createBulk(req, res) {
   const { name, cpfs } = req.body;
   const BATCH_SIZE = 500; // 500 CPFs por job
-  
+
   const batches = [];
   for (let i = 0; i < cpfs.length; i += BATCH_SIZE) {
     batches.push(cpfs.slice(i, i + BATCH_SIZE));
   }
-  
+
   // Criar múltiplos jobs
   for (let i = 0; i < batches.length; i++) {
     await this.create({
@@ -261,7 +412,7 @@ class JobController {
       user: req.user
     }, res);
   }
-  
+
   // 50.000 CPFs = 100 jobs de 500 CPFs cada
   }
 }
