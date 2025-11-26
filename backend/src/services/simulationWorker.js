@@ -298,7 +298,7 @@ async function checkConsultStatus(client, cpf, consultId, simulationId) {
 
 // Worker principal - Processa novas simulações
 simulationQueue.process(MAX_CONCURRENT_SIMULATIONS, async (job) => {
-  const { simulationId, cpf, bankCredentialId, userId } = job.data;
+  const { simulationId, cpf, bankCredentialId, userId, jobId } = job.data;
 
   console.log(`\n🔄 Iniciando processamento - Simulação #${simulationId} - CPF: ${cpf}`);
 
