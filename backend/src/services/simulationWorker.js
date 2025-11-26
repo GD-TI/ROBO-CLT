@@ -357,16 +357,17 @@ simulationQueue.process(5, async (job) => {
       }
     }
 
-    // ✅ SE AINDA WAITING_CONSULT, MARCAR E ADICIONAR NA FILA DE RETRY
+    // ✅ SE AINDA WAITING_CONSULT, MARCAR E ADICIONAR NA FILA DE RETRY COM DELAY MAIOR
     if (consultStatus.status !== 'SUCCESS') {
-      console.log(`⏸️  Consulta ainda aguardando (${consultStatus.status}). Adicionando à fila de retry...`);
-      
+      console.log(`⏸️  Consulta ainda aguardando (${consultStatus.status}). Será reprocessada após outras simulações...`);
+
       await updateSimulation(simulationId, {
         status: 'WAITING_CONSULT',
         description: `Aguardando resposta do banco - Status: ${consultStatus.status}`,
       });
 
-      // Adicionar na fila de retry
+      // Adicionar na fila de retry com delay de 5 minutos
+      // Isso permite que outras simulações sejam processadas primeiro
       await retryQueue.add({
         simulationId,
         cpf,
@@ -374,10 +375,10 @@ simulationQueue.process(5, async (job) => {
         bankCredentialId,
         userId,
       }, {
-        delay: 30000, // Primeira tentativa em 30 segundos
+        delay: 300000, // 5 minutos (300 segundos)
       });
 
-      return { status: 'WAITING_CONSULT', message: 'Adicionado à fila de retry' };
+      return { status: 'WAITING_CONSULT', message: 'Adicionado à fila de retry com delay' };
     }
 
     // ✅ CONTINUAR NORMALMENTE SE JÁ ESTÁ SUCCESS
