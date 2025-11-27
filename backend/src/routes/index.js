@@ -32,6 +32,7 @@ router.delete('/users/:id', userController.delete);
 // Rotas de webhook (monitoramento - protegidas)
 router.get('/webhook/consult', webhookController.listConsultWebhooks);
 router.get('/webhook/consult/:id', webhookController.getConsultWebhook);
+router.put('/webhook/consult/:id/processed', webhookController.markAsProcessed);
 
 // Rotas de credenciais bancárias
 router.post('/bank-credentials', bankCredentialController.create);

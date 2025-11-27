@@ -345,10 +345,13 @@ async function checkConsultStatus(client, cpf, consultId, simulationId) {
   try {
     // Buscar status na tabela webhook_consult ao invés de chamar API
     const result = await db.query(
-      `SELECT id, status, description, message, payload, received_at, updated_at
+      `SELECT consult_id, status, available_margin_value,
+              admission_date_months_difference, month_min, month_max,
+              installments_min, installments_max, value_min, value_max,
+              json_completo, recebido_em, processado
        FROM webhook_consult
-       WHERE id = $1
-       ORDER BY updated_at DESC
+       WHERE consult_id = $1
+       ORDER BY recebido_em DESC
        LIMIT 1`,
       [consultId]
     );
@@ -370,14 +373,19 @@ async function checkConsultStatus(client, cpf, consultId, simulationId) {
     // Log do status atual
     console.log(`📊 Status da consulta ${consultId} (webhook): ${webhookData.status}`);
 
+    // Extrair description e message do json_completo se disponível
+    const jsonData = webhookData.json_completo || {};
+    const description = jsonData.description || jsonData.message || 'Status atualizado via webhook';
+
     return {
       status: webhookData.status,
       data: {
-        id: webhookData.id,
+        id: webhookData.consult_id,
         status: webhookData.status,
-        description: webhookData.description,
-        message: webhookData.message,
-        ...webhookData.payload // Incluir dados adicionais do payload
+        description: description,
+        message: description,
+        availableMarginValue: webhookData.available_margin_value,
+        ...jsonData // Incluir dados adicionais do json_completo
       }
     };
   } catch (error) {
