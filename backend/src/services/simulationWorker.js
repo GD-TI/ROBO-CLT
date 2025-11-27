@@ -340,28 +340,56 @@ async function getCPFDataFromSerasa(cpf) {
   }
 }
 
-// Função auxiliar para verificar status da consulta
+// Função auxiliar para verificar status da consulta (usando webhook_consult)
 async function checkConsultStatus(client, cpf, consultId, simulationId) {
-  const statusResult = await client.getConsultStatus(cpf);
-  
-  if (!statusResult.success) {
-    return { status: 'ERROR', data: null };
+  try {
+    // Buscar status na tabela webhook_consult ao invés de chamar API
+    const result = await db.query(
+      `SELECT id, status, description, message, payload, received_at, updated_at
+       FROM webhook_consult
+       WHERE id = $1
+       ORDER BY updated_at DESC
+       LIMIT 1`,
+      [consultId]
+    );
+
+    if (result.rows.length === 0) {
+      console.log(`⚠️  Consulta ${consultId} não encontrada na tabela webhook_consult (webhook ainda não recebido)`);
+      return {
+        status: 'WAITING_CONSULT',
+        data: {
+          id: consultId,
+          description: 'Aguardando webhook do banco',
+          message: 'Webhook ainda não recebido'
+        }
+      };
+    }
+
+    const webhookData = result.rows[0];
+
+    // Log do status atual
+    console.log(`📊 Status da consulta ${consultId} (webhook): ${webhookData.status}`);
+
+    return {
+      status: webhookData.status,
+      data: {
+        id: webhookData.id,
+        status: webhookData.status,
+        description: webhookData.description,
+        message: webhookData.message,
+        ...webhookData.payload // Incluir dados adicionais do payload
+      }
+    };
+  } catch (error) {
+    console.error(`❌ Erro ao buscar status da consulta ${consultId}:`, error);
+    return {
+      status: 'ERROR',
+      data: {
+        error: error.message,
+        description: 'Erro ao verificar status no banco de dados'
+      }
+    };
   }
-
-  const consults = statusResult.data?.data || statusResult.data || [];
-  const currentConsult = consults.find(c => c.id === consultId);
-
-  if (!currentConsult) {
-    return { status: 'NOT_FOUND', data: null };
-  }
-
-  // Log do status atual
-  console.log(`📊 Status da consulta ${consultId}: ${currentConsult.status}`);
-
-  return {
-    status: currentConsult.status,
-    data: currentConsult
-  };
 }
 
 // Worker principal - Processa novas simulações
