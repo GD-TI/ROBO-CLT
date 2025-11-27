@@ -545,7 +545,7 @@ simulationQueue.process(MAX_CONCURRENT_SIMULATIONS, async (job) => {
       }
     }
 
-    // ✅ SE AINDA WAITING_CONSULT, APENAS MARCAR (NÃO adicionar na fila ainda)
+    // ✅ SE AINDA WAITING_CONSULT, APENAS MARCAR E DISPARAR VERIFICAÇÃO IMEDIATA DE WEBHOOK
     if (consultStatus.status !== 'SUCCESS') {
       // Verificar novamente se não é um status de rejeição
       if (consultStatus.status === 'ERROR' || consultStatus.status === 'FAILED' || consultStatus.status === 'REJECTED') {
@@ -558,15 +558,15 @@ simulationQueue.process(MAX_CONCURRENT_SIMULATIONS, async (job) => {
       }
 
       // Apenas se for realmente WAITING_CONSULT ou PROCESSING
-      console.log(`⏸️  Consulta ainda aguardando (${consultStatus.status}). Será reprocessada após outras simulações...`);
+      console.log(`⏸️  Consulta ainda aguardando (${consultStatus.status}). Verificando webhooks em paralelo...`);
 
       await updateSimulation(simulationId, {
         status: 'WAITING_CONSULT',
         description: consultStatus.data?.description || consultStatus.data?.message || `Aguardando resposta do banco - Status: ${consultStatus.status}`,
       });
 
-      // NÃO adicionar na fila de retry agora
-      // Será adicionado quando todas as outras simulações do job terminarem
+      // Dispara verificação imediata para processar assim que o webhook mais recente estiver disponível
+      await checkWaitingConsultsWebhooks();
 
       return { status: 'WAITING_CONSULT', message: 'Marcado para retry posterior' };
     }
