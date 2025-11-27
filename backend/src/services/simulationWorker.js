@@ -56,7 +56,7 @@ const simulationQueue = new Queue('simulation-queue', {
 });
 
 // Intervalo de verificação de webhooks (1 minuto)
-const WEBHOOK_CHECK_INTERVAL = 60000; // 60 segundos
+const WEBHOOK_CHECK_INTERVAL = 30000; // 30 segundos para capturar novas consultas
 
 // Eventos da fila principal
 simulationQueue.on('error', (error) => {
@@ -626,7 +626,7 @@ async function checkWaitingConsultsWebhooks() {
         `SELECT status, json_completo
          FROM webhook_consult
          WHERE consult_id = $1
-         ORDER BY recebido_em DESC
+         ORDER BY recebido_em DESC, id DESC
          LIMIT 1`,
         [sim.consult_id]
       );
@@ -863,4 +863,4 @@ setInterval(logQueueStatus, 60000);
 // Log inicial após 5 segundos
 setTimeout(logQueueStatus, 5000);
 
-module.exports = { simulationQueue };
+module.exports = { simulationQueue, checkWaitingConsultsWebhooks };
