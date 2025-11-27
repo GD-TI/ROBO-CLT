@@ -50,77 +50,33 @@ class WebhookController {
         value_max
       } = payload;
 
-      // Verificar se webhook já existe para esta consulta
-      const existing = await db.query(
-        'SELECT id FROM webhook_consult WHERE consult_id = $1',
-        [consult_id]
+      // SEMPRE inserir novo webhook (não atualizar o existente)
+      // Mantém histórico de todas as mudanças de status
+      await db.query(
+        `INSERT INTO webhook_consult (
+          type, timestamp_event, consult_id, status,
+          available_margin_value, admission_date_months_difference,
+          month_min, month_max, installments_min, installments_max,
+          value_min, value_max, json_completo, recebido_em, processado
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP, false)`,
+        [
+          type || null,
+          timestamp_event || null,
+          consult_id,
+          status,
+          available_margin_value || null,
+          admission_date_months_difference || null,
+          month_min || null,
+          month_max || null,
+          installments_min || null,
+          installments_max || null,
+          value_min || null,
+          value_max || null,
+          JSON.stringify(payload)
+        ]
       );
 
-      if (existing.rows.length > 0) {
-        // Atualizar webhook existente
-        await db.query(
-          `UPDATE webhook_consult
-           SET type = $1,
-               timestamp_event = $2,
-               status = $3,
-               available_margin_value = $4,
-               admission_date_months_difference = $5,
-               month_min = $6,
-               month_max = $7,
-               installments_min = $8,
-               installments_max = $9,
-               value_min = $10,
-               value_max = $11,
-               json_completo = $12,
-               recebido_em = CURRENT_TIMESTAMP,
-               processado = false
-           WHERE consult_id = $13`,
-          [
-            type || null,
-            timestamp_event || null,
-            status,
-            available_margin_value || null,
-            admission_date_months_difference || null,
-            month_min || null,
-            month_max || null,
-            installments_min || null,
-            installments_max || null,
-            value_min || null,
-            value_max || null,
-            JSON.stringify(payload),
-            consult_id
-          ]
-        );
-
-        console.log(`✅ Webhook atualizado - Consulta #${consult_id}: ${status}`);
-      } else {
-        // Inserir novo webhook
-        await db.query(
-          `INSERT INTO webhook_consult (
-            type, timestamp_event, consult_id, status,
-            available_margin_value, admission_date_months_difference,
-            month_min, month_max, installments_min, installments_max,
-            value_min, value_max, json_completo, recebido_em, processado
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, CURRENT_TIMESTAMP, false)`,
-          [
-            type || null,
-            timestamp_event || null,
-            consult_id,
-            status,
-            available_margin_value || null,
-            admission_date_months_difference || null,
-            month_min || null,
-            month_max || null,
-            installments_min || null,
-            installments_max || null,
-            value_min || null,
-            value_max || null,
-            JSON.stringify(payload)
-          ]
-        );
-
-        console.log(`✅ Webhook inserido - Consulta #${consult_id}: ${status}`);
-      }
+      console.log(`✅ Webhook inserido - Consulta #${consult_id}: ${status}`);
 
       // Responder sucesso ao banco
       res.status(200).json({
