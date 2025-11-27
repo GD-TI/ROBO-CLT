@@ -510,16 +510,17 @@ simulationQueue.process(MAX_CONCURRENT_SIMULATIONS, async (job) => {
     let consultStatus;
     for (let i = 0; i < quickRetries; i++) {
       await sleep(quickInterval);
-      
+
       consultStatus = await checkConsultStatus(client, cpf, consultId, simulationId);
 
       if (consultStatus.status === 'SUCCESS') {
         console.log(`✅ Consulta aprovada rapidamente!`);
         break;
-      } else if (consultStatus.status === 'ERROR' || consultStatus.status === 'FAILED') {
+      } else if (consultStatus.status === 'ERROR' || consultStatus.status === 'FAILED' || consultStatus.status === 'REJECTED') {
+        console.log(`❌ Consulta rejeitada com status: ${consultStatus.status}`);
         await updateSimulation(simulationId, {
           status: 'REJECTED',
-          description: consultStatus.data?.description || 'Consulta rejeitada',
+          description: consultStatus.data?.description || consultStatus.data?.message || 'Consulta rejeitada pelo banco',
         });
         return { status: 'REJECTED', message: 'Consulta rejeitada pelo banco' };
       }
@@ -527,11 +528,22 @@ simulationQueue.process(MAX_CONCURRENT_SIMULATIONS, async (job) => {
 
     // ✅ SE AINDA WAITING_CONSULT, APENAS MARCAR (NÃO adicionar na fila ainda)
     if (consultStatus.status !== 'SUCCESS') {
+      // Verificar novamente se não é um status de rejeição
+      if (consultStatus.status === 'ERROR' || consultStatus.status === 'FAILED' || consultStatus.status === 'REJECTED') {
+        console.log(`❌ Consulta rejeitada após tentativas com status: ${consultStatus.status}`);
+        await updateSimulation(simulationId, {
+          status: 'REJECTED',
+          description: consultStatus.data?.description || consultStatus.data?.message || 'Consulta rejeitada pelo banco',
+        });
+        return { status: 'REJECTED', message: 'Consulta rejeitada pelo banco' };
+      }
+
+      // Apenas se for realmente WAITING_CONSULT ou PROCESSING
       console.log(`⏸️  Consulta ainda aguardando (${consultStatus.status}). Será reprocessada após outras simulações...`);
 
       await updateSimulation(simulationId, {
         status: 'WAITING_CONSULT',
-        description: `Aguardando resposta do banco - Status: ${consultStatus.status}`,
+        description: consultStatus.data?.description || consultStatus.data?.message || `Aguardando resposta do banco - Status: ${consultStatus.status}`,
       });
 
       // NÃO adicionar na fila de retry agora
@@ -593,28 +605,30 @@ retryQueue.process(MAX_CONCURRENT_RETRIES, async (job) => {
 
     if (consultStatus.status === 'SUCCESS') {
       console.log(`✅ Consulta aprovada no retry!`);
-      
+
       await updateSimulation(simulationId, {
         status: 'PROCESSING',
-        description: 'Retomando processamento após aprovação',
+        description: consultStatus.data?.description || consultStatus.data?.message || 'Retomando processamento após aprovação',
       });
 
       // Continuar processamento
       return await processSimulation(client, simulationId, cpf, consultId);
 
-    } else if (consultStatus.status === 'ERROR' || consultStatus.status === 'FAILED') {
+    } else if (consultStatus.status === 'ERROR' || consultStatus.status === 'FAILED' || consultStatus.status === 'REJECTED') {
+      console.log(`❌ Consulta rejeitada no retry com status: ${consultStatus.status}`);
       await updateSimulation(simulationId, {
         status: 'REJECTED',
-        description: consultStatus.data?.description || 'Consulta rejeitada',
+        description: consultStatus.data?.description || consultStatus.data?.message || 'Consulta rejeitada pelo banco',
       });
-      return { status: 'REJECTED', message: 'Consulta rejeitada no retry' };
+      // NÃO FAZER MAIS RETRY - retornar sucesso para parar as tentativas
+      return { status: 'REJECTED', message: 'Consulta rejeitada - sem retry' };
 
     } else {
       // Ainda waiting, continuar tentando
       console.log(`⏸️  Ainda aguardando (${consultStatus.status}). Tentando novamente em 30s...`);
-      
+
       await updateSimulation(simulationId, {
-        description: `Aguardando resposta - Tentativa ${job.attemptsMade + 1}/10`,
+        description: consultStatus.data?.description || consultStatus.data?.message || `Aguardando resposta - Tentativa ${job.attemptsMade + 1}/10`,
       });
 
       throw new Error('Ainda em waiting_consult'); // Força retry
