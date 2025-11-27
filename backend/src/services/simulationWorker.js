@@ -828,18 +828,19 @@ async function logQueueStatus() {
       simulationQueue.getFailedCount(),
     ]);
 
-    const [retryWaiting, retryActive] = await Promise.all([
-      retryQueue.getWaitingCount(),
-      retryQueue.getActiveCount(),
-    ]);
+    // Contar simulações aguardando webhook
+    const waitingWebhookResult = await db.query(
+      `SELECT COUNT(*) as count FROM simulations WHERE status = 'WAITING_CONSULT'`
+    );
+    const waitingWebhook = parseInt(waitingWebhookResult.rows[0]?.count || 0);
 
-    const totalPending = simWaiting + retryWaiting;
-    const totalActive = simActive + retryActive;
+    const totalPending = simWaiting;
+    const totalActive = simActive;
 
-    if (totalPending > 0 || totalActive > 0) {
+    if (totalPending > 0 || totalActive > 0 || waitingWebhook > 0) {
       console.log('\n📊 Status das Filas:');
       console.log(`   Simulações: ${simActive} processando | ${simWaiting} aguardando | ✅ ${simCompleted} | ❌ ${simFailed}`);
-      console.log(`   Retries: ${retryActive} processando | ${retryWaiting} aguardando`);
+      console.log(`   Aguardando webhook: ${waitingWebhook} consultas`);
       console.log(`   Total: ${totalActive} ativos | ${totalPending} pendentes`);
 
       // Calcular tempo estimado (assumindo 15s por simulação)
@@ -862,4 +863,4 @@ setInterval(logQueueStatus, 60000);
 // Log inicial após 5 segundos
 setTimeout(logQueueStatus, 5000);
 
-module.exports = { simulationQueue, retryQueue };
+module.exports = { simulationQueue };
