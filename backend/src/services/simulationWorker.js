@@ -55,19 +55,8 @@ const simulationQueue = new Queue('simulation-queue', {
   },
 });
 
-// Fila de retry para waiting_consult
-const retryQueue = new Queue('retry-waiting-consult', {
-  redis: redisConfig,
-  defaultJobOptions: {
-    attempts: 10, // Tentar 10 vezes
-    backoff: {
-      type: 'fixed',
-      delay: 30000, // 30 segundos entre tentativas
-    },
-    removeOnComplete: false,
-    removeOnFail: false,
-  },
-});
+// Intervalo de verificação de webhooks (1 minuto)
+const WEBHOOK_CHECK_INTERVAL = 60000; // 60 segundos
 
 // Eventos da fila principal
 simulationQueue.on('error', (error) => {
@@ -84,19 +73,6 @@ simulationQueue.on('completed', (job, result) => {
 
 simulationQueue.on('failed', (job, err) => {
   console.error(`❌ Job ${job.id} falhou:`, err.message);
-});
-
-// Eventos da fila de retry
-retryQueue.on('active', (job) => {
-  console.log(`🔁 Retry job ${job.id} - CPF: ${job.data.cpf} (tentativa ${job.attemptsMade + 1}/10)`);
-});
-
-retryQueue.on('completed', (job, result) => {
-  console.log(`✅ Retry job ${job.id} completado - Status: ${result.status}`);
-});
-
-retryQueue.on('failed', (job, err) => {
-  console.error(`❌ Retry job ${job.id} esgotou tentativas:`, err.message);
 });
 
 async function sleep(ms) {
@@ -318,36 +294,10 @@ async function checkAndRetryWaitingConsults(jobId) {
       return;
     }
 
-    console.log(`🔄 Job #${jobId} - Reprocessando ${waitingConsults.length} consultas em espera...`);
+    console.log(`⏳ Job #${jobId} - ${waitingConsults.length} consultas aguardando webhook do banco...`);
 
-    // Buscar consult_id de cada simulação e adicionar na fila de retry
-    for (const sim of waitingConsults) {
-      const simDetails = await db.query(
-        `SELECT consult_id, user_id FROM simulations WHERE id = $1`,
-        [sim.id]
-      );
-
-      if (simDetails.rows.length > 0) {
-        const { consult_id, user_id } = simDetails.rows[0];
-
-        await retryQueue.add({
-          simulationId: sim.id,
-          cpf: sim.cpf,
-          consultId: consult_id,
-          bankCredentialId: sim.bank_credential_id,
-          userId: user_id,
-        }, {
-          delay: 5000, // 5 segundos
-          attempts: 50, // Aumentado de 10 para 50 tentativas
-          backoff: {
-            type: 'exponential',
-            delay: 30000, // 30 segundos entre tentativas
-          },
-        });
-
-        console.log(`  ✅ Simulação #${sim.id} adicionada à fila de retry (até 50 tentativas)`);
-      }
-    }
+    // Não faz nada - aguarda passivamente o webhook atualizar a tabela
+    // A função checkWaitingConsultsWebhooks() roda periodicamente e processa quando webhook chegar
   } catch (error) {
     console.error('Erro ao verificar consultas em espera:', error);
   }
@@ -652,107 +602,97 @@ simulationQueue.process(MAX_CONCURRENT_SIMULATIONS, async (job) => {
   }
 });
 
-// Worker de retry - Processa simulações em WAITING_CONSULT
-retryQueue.process(MAX_CONCURRENT_RETRIES, async (job) => {
-  const { simulationId, cpf, consultId, bankCredentialId, userId } = job.data;
-
-  console.log(`\n🔁 Retry #${job.attemptsMade + 1}/50 - Simulação #${simulationId} - CPF: ${cpf}`);
-
+// Verificação periódica de webhooks para simulações WAITING_CONSULT
+async function checkWaitingConsultsWebhooks() {
   try {
-    // Buscar job_id da simulação
-    const simResult = await db.query(
-      'SELECT job_id FROM simulations WHERE id = $1',
-      [simulationId]
+    // Buscar todas as simulações aguardando webhook
+    const waitingSimulations = await db.query(
+      `SELECT s.id, s.cpf, s.consult_id, s.bank_credential_id, s.user_id, s.job_id
+       FROM simulations s
+       WHERE s.status = 'WAITING_CONSULT'
+       ORDER BY s.created_at ASC
+       LIMIT 100`
     );
-    const jobId = simResult.rows[0]?.job_id;
 
-    // Obter token novamente
-    const bankCredentialController = require('../controllers/bankCredentialController');
-    const authToken = await bankCredentialController.getValidToken(bankCredentialId, userId);
-
-    if (!authToken) {
-      throw new Error('Falha ao obter token bancário no retry');
+    if (waitingSimulations.rows.length === 0) {
+      return;
     }
 
-    const client = new BankAPIClient(authToken);
+    console.log(`\n🔍 Verificando ${waitingSimulations.rows.length} consultas aguardando webhook...`);
 
-    // Verificar status
-    const consultStatus = await checkConsultStatus(client, cpf, consultId, simulationId);
+    for (const sim of waitingSimulations.rows) {
+      // Verificar se webhook chegou
+      const webhookResult = await db.query(
+        `SELECT status, json_completo
+         FROM webhook_consult
+         WHERE consult_id = $1
+         ORDER BY recebido_em DESC
+         LIMIT 1`,
+        [sim.consult_id]
+      );
 
-    if (consultStatus.status === 'SUCCESS') {
-      console.log(`✅ Consulta aprovada no retry!`);
-
-      await updateSimulation(simulationId, {
-        status: 'PROCESSING',
-        description: consultStatus.data?.description || consultStatus.data?.message || 'Retomando processamento após aprovação',
-      });
-
-      // Continuar processamento
-      const result = await processSimulation(client, simulationId, cpf, consultId);
-
-      // Verificar se job pode ser finalizado
-      if (jobId) {
-        await checkAndRetryWaitingConsults(jobId);
+      if (webhookResult.rows.length === 0) {
+        // Webhook ainda não chegou - continua aguardando
+        continue;
       }
 
-      return result;
+      const webhook = webhookResult.rows[0];
+      const webhookData = webhook.json_completo || {};
+      const description = webhookData.description || webhookData.message || 'Status atualizado';
 
-    } else if (consultStatus.status === 'ERROR' || consultStatus.status === 'FAILED' || consultStatus.status === 'REJECTED') {
-      console.log(`❌ Consulta rejeitada no retry com status: ${consultStatus.status}`);
-      await updateSimulation(simulationId, {
-        status: 'REJECTED',
-        description: consultStatus.data?.description || consultStatus.data?.message || 'Consulta rejeitada pelo banco',
-      });
+      if (webhook.status === 'SUCCESS') {
+        console.log(`✅ Webhook SUCCESS recebido para simulação #${sim.id} - Processando...`);
 
-      // Verificar se job pode ser finalizado
-      if (jobId) {
-        await checkAndRetryWaitingConsults(jobId);
+        // Obter token e processar
+        const bankCredentialController = require('../controllers/bankCredentialController');
+        const authToken = await bankCredentialController.getValidToken(sim.bank_credential_id, sim.user_id);
+
+        if (authToken) {
+          const client = new BankAPIClient(authToken);
+
+          await updateSimulation(sim.id, {
+            status: 'PROCESSING',
+            description: description,
+          });
+
+          await processSimulation(client, sim.id, sim.cpf, sim.consult_id);
+        } else {
+          await updateSimulation(sim.id, {
+            status: 'FAILED',
+            error_message: 'Falha ao obter token bancário',
+            description: 'Erro ao processar após webhook'
+          });
+        }
+
+        // Verificar se job pode ser finalizado
+        if (sim.job_id) {
+          await checkAndRetryWaitingConsults(sim.job_id);
+        }
+
+      } else if (webhook.status === 'ERROR' || webhook.status === 'FAILED' || webhook.status === 'REJECTED') {
+        console.log(`❌ Webhook ${webhook.status} recebido para simulação #${sim.id}`);
+
+        await updateSimulation(sim.id, {
+          status: 'REJECTED',
+          description: description,
+        });
+
+        // Verificar se job pode ser finalizado
+        if (sim.job_id) {
+          await checkAndRetryWaitingConsults(sim.job_id);
+        }
       }
-
-      // NÃO FAZER MAIS RETRY - retornar sucesso para parar as tentativas
-      return { status: 'REJECTED', message: 'Consulta rejeitada - sem retry' };
-
-    } else {
-      // Ainda waiting, continuar tentando
-      console.log(`⏸️  Ainda aguardando (${consultStatus.status}). Tentando novamente em 30s...`);
-
-      await updateSimulation(simulationId, {
-        description: consultStatus.data?.description || consultStatus.data?.message || `Aguardando resposta - Tentativa ${job.attemptsMade + 1}/50`,
-      });
-
-      throw new Error('Ainda em waiting_consult'); // Força retry
+      // Se ainda for WAITING_CONSULT, continua aguardando passivamente
     }
 
   } catch (error) {
-    console.error(`❌ Erro no retry da simulação #${simulationId}:`, error.message);
-
-    // Buscar job_id para verificar finalização
-    const simResult = await db.query(
-      'SELECT job_id FROM simulations WHERE id = $1',
-      [simulationId]
-    );
-    const jobId = simResult.rows[0]?.job_id;
-
-    // Se esgotou tentativas (50 tentativas = ~25 minutos)
-    if (job.attemptsMade >= 49) {
-      console.log(`⏱️  Timeout - Simulação #${simulationId} esgotou 50 tentativas`);
-      await updateSimulation(simulationId, {
-        status: 'TIMEOUT',
-        description: 'Timeout após múltiplas tentativas',
-        error_message: 'Banco não respondeu após 50 tentativas',
-      });
-
-      // Verificar se job pode ser finalizado
-      if (jobId) {
-        await checkAndRetryWaitingConsults(jobId);
-      }
-
-      return { status: 'TIMEOUT', message: 'Timeout após 50 tentativas' };
-    }
-
-    throw error; // Propaga erro para Bull fazer retry
+    console.error('❌ Erro ao verificar webhooks:', error);
   }
-});
+}
+
+// Iniciar verificação periódica
+setInterval(checkWaitingConsultsWebhooks, WEBHOOK_CHECK_INTERVAL);
+console.log(`⏱️  Verificação de webhooks iniciada (intervalo: ${WEBHOOK_CHECK_INTERVAL/1000}s)`);
 
 // Função auxiliar para processar simulação (após consulta aprovada)
 async function processSimulation(client, simulationId, cpf, consultId) {
