@@ -1,4 +1,5 @@
 const db = require('../config/database');
+const { checkWaitingConsultsWebhooks } = require('../services/simulationWorker');
 
 class WebhookController {
   /**
@@ -123,6 +124,8 @@ class WebhookController {
       }
 
       // Responder sucesso ao banco
+      await checkWaitingConsultsWebhooks();
+
       res.status(200).json({
         success: true,
         message: 'Webhook recebido e processado com sucesso',

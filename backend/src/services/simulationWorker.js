@@ -863,4 +863,4 @@ setInterval(logQueueStatus, 60000);
 // Log inicial após 5 segundos
 setTimeout(logQueueStatus, 5000);
 
-module.exports = { simulationQueue };
+module.exports = { simulationQueue, checkWaitingConsultsWebhooks };
