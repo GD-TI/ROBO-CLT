@@ -253,17 +253,20 @@ async function checkAndRetryWaitingConsults(jobId) {
     const statusCounts = {
       pending: simulations.filter(s => s.status === 'PENDING').length,
       processing: simulations.filter(s => s.status === 'PROCESSING').length,
-      waiting: simulations.filter(s => s.status === 'WAITING_CONSULT').length,
+      waitingConsult: simulations.filter(s => s.status === 'WAITING_CONSULT').length,
+      waitingConsent: simulations.filter(s => s.status === 'WAITING_CONSENT').length,
       completed: simulations.filter(s => s.status === 'COMPLETED').length,
       rejected: simulations.filter(s => s.status === 'REJECTED').length,
       failed: simulations.filter(s => s.status === 'FAILED').length,
       timeout: simulations.filter(s => s.status === 'TIMEOUT').length,
     };
 
-    // Status finais (não incluem WAITING_CONSULT, PENDING, PROCESSING)
+    const totalWaiting = statusCounts.waitingConsult + statusCounts.waitingConsent;
+
+    // Status finais (não incluem WAITING_CONSULT/WAITING_CONSENT, PENDING, PROCESSING)
     const finalStatuses = statusCounts.completed + statusCounts.rejected + statusCounts.failed + statusCounts.timeout;
 
-    console.log(`📊 Job #${jobId} - Status: ${finalStatuses}/${totalSimulations} finalizadas (WAITING: ${statusCounts.waiting}, PROCESSING: ${statusCounts.processing}, PENDING: ${statusCounts.pending})`);
+    console.log(`📊 Job #${jobId} - Status: ${finalStatuses}/${totalSimulations} finalizadas (WAITING: ${totalWaiting}, PROCESSING: ${statusCounts.processing}, PENDING: ${statusCounts.pending})`);
 
     // Verificar se ainda há simulações PENDING ou PROCESSING
     const stillProcessing = statusCounts.pending > 0 || statusCounts.processing > 0;
@@ -273,8 +276,10 @@ async function checkAndRetryWaitingConsults(jobId) {
       return;
     }
 
-    // Buscar todas as simulações WAITING_CONSULT
-    const waitingConsults = simulations.filter(s => s.status === 'WAITING_CONSULT');
+    // Buscar todas as simulações WAITING_CONSULT/WAITING_CONSENT
+    const waitingConsults = simulations.filter(s =>
+      s.status === 'WAITING_CONSULT' || s.status === 'WAITING_CONSENT'
+    );
 
     if (waitingConsults.length === 0) {
       // TODAS as simulações têm status final - marcar job como COMPLETED
@@ -294,7 +299,7 @@ async function checkAndRetryWaitingConsults(jobId) {
       return;
     }
 
-    console.log(`⏳ Job #${jobId} - ${waitingConsults.length} consultas aguardando webhook do banco...`);
+    console.log(`⏳ Job #${jobId} - ${waitingConsults.length} consultas/consents aguardando webhook do banco...`);
 
     // Não faz nada - aguarda passivamente o webhook atualizar a tabela
     // A função checkWaitingConsultsWebhooks() roda periodicamente e processa quando webhook chegar
@@ -609,7 +614,7 @@ async function checkWaitingConsultsWebhooks() {
     const waitingSimulations = await db.query(
       `SELECT s.id, s.cpf, s.consult_id, s.bank_credential_id, s.user_id, s.job_id
        FROM simulations s
-       WHERE s.status = 'WAITING_CONSULT'
+       WHERE s.status IN ('WAITING_CONSULT', 'WAITING_CONSENT')
        ORDER BY s.created_at ASC
        LIMIT 100`
     );
@@ -830,7 +835,7 @@ async function logQueueStatus() {
 
     // Contar simulações aguardando webhook
     const waitingWebhookResult = await db.query(
-      `SELECT COUNT(*) as count FROM simulations WHERE status = 'WAITING_CONSULT'`
+      `SELECT COUNT(*) as count FROM simulations WHERE status IN ('WAITING_CONSULT', 'WAITING_CONSENT')`
     );
     const waitingWebhook = parseInt(waitingWebhookResult.rows[0]?.count || 0);
 
