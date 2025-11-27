@@ -13,13 +13,20 @@ const PORT = process.env.PORT || 3000;
 app.use(helmet());
 app.use(cors());
 
-// Rate limiting global
-const limiter = rateLimit({
+// Rate limiting global (mais permissivo para uso normal)
+const globalLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutos
-  max: 100, // limite de 100 requisições por IP
+  max: 500, // 500 requisições por IP (aumentado de 100)
   message: 'Muitas requisições deste IP, tente novamente mais tarde',
+  standardHeaders: true,
+  legacyHeaders: false,
+  // Pular rate limit para webhooks e health check
+  skip: (req) => {
+    return req.path === '/health' || req.path === '/api/webhook/consult';
+  }
 });
-app.use(limiter);
+
+app.use(globalLimiter);
 
 // Body parser
 app.use(express.json({ limit: '10mb' }));

@@ -1,4 +1,5 @@
 const express = require('express');
+const rateLimit = require('express-rate-limit');
 const authController = require('../controllers/authController');
 const bankCredentialController = require('../controllers/bankCredentialController');
 const simulationController = require('../controllers/simulationController');
@@ -6,8 +7,17 @@ const authMiddleware = require('../middleware/auth');
 
 const router = express.Router();
 
+// Rate limiter específico para login (mais rigoroso)
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutos
+  max: 10, // 10 tentativas de login
+  message: 'Muitas tentativas de login, tente novamente em 15 minutos',
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+
 // Rotas públicas de autenticação
-router.post('/auth/login', authController.login);
+router.post('/auth/login', loginLimiter, authController.login);
 
 // Remover registro (sistema de usuário único)
 // router.post('/auth/register', authController.register);
