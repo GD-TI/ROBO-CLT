@@ -271,11 +271,26 @@ async function checkAndRetryWaitingConsults(jobId) {
     );
 
     const simulations = result.rows;
+    const totalSimulations = simulations.length;
+
+    // Contar simulações por status
+    const statusCounts = {
+      pending: simulations.filter(s => s.status === 'PENDING').length,
+      processing: simulations.filter(s => s.status === 'PROCESSING').length,
+      waiting: simulations.filter(s => s.status === 'WAITING_CONSULT').length,
+      completed: simulations.filter(s => s.status === 'COMPLETED').length,
+      rejected: simulations.filter(s => s.status === 'REJECTED').length,
+      failed: simulations.filter(s => s.status === 'FAILED').length,
+      timeout: simulations.filter(s => s.status === 'TIMEOUT').length,
+    };
+
+    // Status finais (não incluem WAITING_CONSULT, PENDING, PROCESSING)
+    const finalStatuses = statusCounts.completed + statusCounts.rejected + statusCounts.failed + statusCounts.timeout;
+
+    console.log(`📊 Job #${jobId} - Status: ${finalStatuses}/${totalSimulations} finalizadas (WAITING: ${statusCounts.waiting}, PROCESSING: ${statusCounts.processing}, PENDING: ${statusCounts.pending})`);
 
     // Verificar se ainda há simulações PENDING ou PROCESSING
-    const stillProcessing = simulations.some(s =>
-      s.status === 'PENDING' || s.status === 'PROCESSING'
-    );
+    const stillProcessing = statusCounts.pending > 0 || statusCounts.processing > 0;
 
     if (stillProcessing) {
       console.log(`⏸️  Job #${jobId} ainda tem simulações pendentes. Aguardando...`);
@@ -286,7 +301,20 @@ async function checkAndRetryWaitingConsults(jobId) {
     const waitingConsults = simulations.filter(s => s.status === 'WAITING_CONSULT');
 
     if (waitingConsults.length === 0) {
-      console.log(`✅ Job #${jobId} concluído sem consultas em espera`);
+      // TODAS as simulações têm status final - marcar job como COMPLETED
+      console.log(`✅ Job #${jobId} - Todas as simulações finalizadas!`);
+
+      await db.query(
+        `UPDATE jobs
+         SET status = 'COMPLETED',
+             success_count = $1,
+             failed_count = $2,
+             updated_at = CURRENT_TIMESTAMP
+         WHERE id = $3`,
+        [statusCounts.completed, statusCounts.rejected + statusCounts.failed + statusCounts.timeout, jobId]
+      );
+
+      console.log(`✅ Job #${jobId} marcado como COMPLETED`);
       return;
     }
 
@@ -309,10 +337,15 @@ async function checkAndRetryWaitingConsults(jobId) {
           bankCredentialId: sim.bank_credential_id,
           userId: user_id,
         }, {
-          delay: 5000, // 5 segundos apenas
+          delay: 5000, // 5 segundos
+          attempts: 50, // Aumentado de 10 para 50 tentativas
+          backoff: {
+            type: 'exponential',
+            delay: 30000, // 30 segundos entre tentativas
+          },
         });
 
-        console.log(`  ✅ Simulação #${sim.id} adicionada à fila de retry`);
+        console.log(`  ✅ Simulação #${sim.id} adicionada à fila de retry (até 50 tentativas)`);
       }
     }
   } catch (error) {
@@ -623,9 +656,16 @@ simulationQueue.process(MAX_CONCURRENT_SIMULATIONS, async (job) => {
 retryQueue.process(MAX_CONCURRENT_RETRIES, async (job) => {
   const { simulationId, cpf, consultId, bankCredentialId, userId } = job.data;
 
-  console.log(`\n🔁 Retry #${job.attemptsMade + 1}/10 - Simulação #${simulationId} - CPF: ${cpf}`);
+  console.log(`\n🔁 Retry #${job.attemptsMade + 1}/50 - Simulação #${simulationId} - CPF: ${cpf}`);
 
   try {
+    // Buscar job_id da simulação
+    const simResult = await db.query(
+      'SELECT job_id FROM simulations WHERE id = $1',
+      [simulationId]
+    );
+    const jobId = simResult.rows[0]?.job_id;
+
     // Obter token novamente
     const bankCredentialController = require('../controllers/bankCredentialController');
     const authToken = await bankCredentialController.getValidToken(bankCredentialId, userId);
@@ -648,7 +688,14 @@ retryQueue.process(MAX_CONCURRENT_RETRIES, async (job) => {
       });
 
       // Continuar processamento
-      return await processSimulation(client, simulationId, cpf, consultId);
+      const result = await processSimulation(client, simulationId, cpf, consultId);
+
+      // Verificar se job pode ser finalizado
+      if (jobId) {
+        await checkAndRetryWaitingConsults(jobId);
+      }
+
+      return result;
 
     } else if (consultStatus.status === 'ERROR' || consultStatus.status === 'FAILED' || consultStatus.status === 'REJECTED') {
       console.log(`❌ Consulta rejeitada no retry com status: ${consultStatus.status}`);
@@ -656,6 +703,12 @@ retryQueue.process(MAX_CONCURRENT_RETRIES, async (job) => {
         status: 'REJECTED',
         description: consultStatus.data?.description || consultStatus.data?.message || 'Consulta rejeitada pelo banco',
       });
+
+      // Verificar se job pode ser finalizado
+      if (jobId) {
+        await checkAndRetryWaitingConsults(jobId);
+      }
+
       // NÃO FAZER MAIS RETRY - retornar sucesso para parar as tentativas
       return { status: 'REJECTED', message: 'Consulta rejeitada - sem retry' };
 
@@ -664,7 +717,7 @@ retryQueue.process(MAX_CONCURRENT_RETRIES, async (job) => {
       console.log(`⏸️  Ainda aguardando (${consultStatus.status}). Tentando novamente em 30s...`);
 
       await updateSimulation(simulationId, {
-        description: consultStatus.data?.description || consultStatus.data?.message || `Aguardando resposta - Tentativa ${job.attemptsMade + 1}/10`,
+        description: consultStatus.data?.description || consultStatus.data?.message || `Aguardando resposta - Tentativa ${job.attemptsMade + 1}/50`,
       });
 
       throw new Error('Ainda em waiting_consult'); // Força retry
@@ -672,14 +725,29 @@ retryQueue.process(MAX_CONCURRENT_RETRIES, async (job) => {
 
   } catch (error) {
     console.error(`❌ Erro no retry da simulação #${simulationId}:`, error.message);
-    
-    // Se esgotou tentativas (10 tentativas = ~5 minutos)
-    if (job.attemptsMade >= 9) {
+
+    // Buscar job_id para verificar finalização
+    const simResult = await db.query(
+      'SELECT job_id FROM simulations WHERE id = $1',
+      [simulationId]
+    );
+    const jobId = simResult.rows[0]?.job_id;
+
+    // Se esgotou tentativas (50 tentativas = ~25 minutos)
+    if (job.attemptsMade >= 49) {
+      console.log(`⏱️  Timeout - Simulação #${simulationId} esgotou 50 tentativas`);
       await updateSimulation(simulationId, {
         status: 'TIMEOUT',
         description: 'Timeout após múltiplas tentativas',
-        error_message: 'Banco não respondeu após 10 tentativas',
+        error_message: 'Banco não respondeu após 50 tentativas',
       });
+
+      // Verificar se job pode ser finalizado
+      if (jobId) {
+        await checkAndRetryWaitingConsults(jobId);
+      }
+
+      return { status: 'TIMEOUT', message: 'Timeout após 50 tentativas' };
     }
 
     throw error; // Propaga erro para Bull fazer retry
