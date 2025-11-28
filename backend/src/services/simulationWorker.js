@@ -55,7 +55,7 @@ const simulationQueue = new Queue('simulation-queue', {
   },
 });
 
-// Intervalo de verificação de webhooks (1 minuto)
+// Intervalo de verificação de webhooks (30 segundos)
 const WEBHOOK_CHECK_INTERVAL = 30000; // 30 segundos para capturar novas consultas
 
 // Eventos da fila principal
@@ -526,65 +526,17 @@ simulationQueue.process(MAX_CONCURRENT_SIMULATIONS, async (job) => {
       return { status: 'FAILED', message: 'Falha ao autorizar consulta' };
     }
 
-    // ✅ AGUARDAR APENAS 3 TENTATIVAS (rápido)
-    console.log(`⏳ Verificando status da consulta (tentativas rápidas)...`);
-    const quickRetries = 3;
-    const quickInterval = 3000; // 3 segundos
+    // ✅ MARCAR COMO WAITING_CONSULT E AGUARDAR WEBHOOK PASSIVAMENTE
+    console.log(`⏸️  Consulta autorizada. Aguardando webhook do banco...`);
 
-    let consultStatus;
-    for (let i = 0; i < quickRetries; i++) {
-      await sleep(quickInterval);
+    await updateSimulation(simulationId, {
+      status: 'WAITING_CONSULT',
+      description: 'Consulta autorizada - Aguardando resposta do banco via webhook',
+    });
 
-      consultStatus = await checkConsultStatus(client, cpf, consultId, simulationId);
-
-      if (consultStatus.status === 'SUCCESS') {
-        console.log(`✅ Consulta aprovada rapidamente!`);
-        break;
-      } else if (consultStatus.status === 'ERROR' || consultStatus.status === 'FAILED' || consultStatus.status === 'REJECTED') {
-        console.log(`❌ Consulta rejeitada com status: ${consultStatus.status}`);
-        await updateSimulation(simulationId, {
-          status: 'REJECTED',
-          description: consultStatus.data?.description || consultStatus.data?.message || 'Consulta rejeitada pelo banco',
-        });
-        return { status: 'REJECTED', message: 'Consulta rejeitada pelo banco' };
-      }
-    }
-
-    // ✅ SE AINDA WAITING_CONSULT, APENAS MARCAR E DISPARAR VERIFICAÇÃO IMEDIATA DE WEBHOOK
-    if (consultStatus.status !== 'SUCCESS') {
-      // Verificar novamente se não é um status de rejeição
-      if (consultStatus.status === 'ERROR' || consultStatus.status === 'FAILED' || consultStatus.status === 'REJECTED') {
-        console.log(`❌ Consulta rejeitada após tentativas com status: ${consultStatus.status}`);
-        await updateSimulation(simulationId, {
-          status: 'REJECTED',
-          description: consultStatus.data?.description || consultStatus.data?.message || 'Consulta rejeitada pelo banco',
-        });
-        return { status: 'REJECTED', message: 'Consulta rejeitada pelo banco' };
-      }
-
-      // Apenas se for realmente WAITING_CONSULT ou PROCESSING
-      console.log(`⏸️  Consulta ainda aguardando (${consultStatus.status}). Verificando webhooks em paralelo...`);
-
-      await updateSimulation(simulationId, {
-        status: 'WAITING_CONSULT',
-        description: consultStatus.data?.description || consultStatus.data?.message || `Aguardando resposta do banco - Status: ${consultStatus.status}`,
-      });
-
-      // Dispara verificação imediata para processar assim que o webhook mais recente estiver disponível
-      await checkWaitingConsultsWebhooks();
-
-      return { status: 'WAITING_CONSULT', message: 'Marcado para retry posterior' };
-    }
-
-    // ✅ CONTINUAR NORMALMENTE SE JÁ ESTÁ SUCCESS
-    const result = await processSimulation(client, simulationId, cpf, consultId);
-
-    // Verificar se há consultas WAITING_CONSULT para reprocessar
-    if (jobId) {
-      await checkAndRetryWaitingConsults(jobId);
-    }
-
-    return result;
+    // A função checkWaitingConsultsWebhooks() rodando a cada 30 segundos
+    // vai verificar o banco de dados e processar quando o webhook chegar
+    return { status: 'WAITING_CONSULT', message: 'Aguardando webhook do banco' };
 
   } catch (error) {
     console.error(`❌ Erro na simulação #${simulationId}:`, error);
